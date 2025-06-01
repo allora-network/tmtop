@@ -2,15 +2,23 @@ package types
 
 import (
 	"fmt"
-	"main/pkg/utils"
 	"maps"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
+
+	"main/pkg/utils"
+
+	butils "github.com/brynbellomy/go-utils"
+	cptypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	ctypes "github.com/cometbft/cometbft/types"
+	"github.com/rs/zerolog"
 )
 
 type State struct {
+	logger zerolog.Logger
+
 	Height                       int64
 	Round                        int64
 	Step                         int64
@@ -23,11 +31,14 @@ type State struct {
 	BlockTime                    time.Duration
 	NetInfo                      *NetInfo
 
+	VotesByRound     *RoundDataMap
+	ProposalsByRound *butils.SortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]]
+
 	validatorsByPeerID map[string]Validator
 
 	currentRPC string
-	knownRPCs  *utils.OrderedMap[string, RPC]
-	rpcPeers   *utils.OrderedMap[string, []Peer]
+	knownRPCs  *butils.OrderedMap[string, RPC]
+	rpcPeers   *butils.OrderedMap[string, []Peer]
 	muRPCs     *sync.RWMutex
 
 	ConsensusStateError  error
@@ -55,19 +66,22 @@ func NewRPCFromPeer(peer Peer) RPC {
 	}
 }
 
-func NewState(firstRPC string) *State {
+func NewState(firstRPC string, logger zerolog.Logger) *State {
 	return &State{
+		logger:             logger.With().Str("component", "state").Logger(),
 		Height:             0,
 		Round:              0,
 		Step:               0,
 		Validators:         nil,
 		ChainValidators:    nil,
+		VotesByRound:       NewRoundDataMap(),
+		ProposalsByRound:   butils.NewSortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]](),
 		validatorsByPeerID: make(map[string]Validator),
 		StartTime:          time.Now(),
 		BlockTime:          0,
 		currentRPC:         firstRPC,
-		knownRPCs:          utils.NewOrderedMap[string, RPC](),
-		rpcPeers:           utils.NewOrderedMap[string, []Peer](),
+		knownRPCs:          butils.NewOrderedMap[string, RPC](),
+		rpcPeers:           butils.NewOrderedMap[string, []Peer](),
 		muRPCs:             &sync.RWMutex{},
 	}
 }
@@ -117,7 +131,7 @@ func (s *State) KnownRPCByURL(url string) (RPC, bool) {
 	return rpc, ok
 }
 
-func (s *State) KnownRPCs() *utils.OrderedMap[string, RPC] {
+func (s *State) KnownRPCs() *butils.OrderedMap[string, RPC] {
 	s.muRPCs.RLock()
 	defer s.muRPCs.RUnlock()
 
@@ -203,6 +217,18 @@ func (s *State) SetTendermintResponse(
 	return nil
 }
 
+func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
+	for _, event := range events {
+		switch x := event.(type) {
+		case ctypes.EventDataNewRound:
+			s.VotesByRound.AddProposer(x.Height, x.Round, x.Proposer.Address.String())
+
+		case ctypes.EventDataVote:
+			s.VotesByRound.AddVote(x.Vote.Height, x.Vote.Round, x.Vote.ValidatorAddress.String(), x.Vote.Type, x.Vote.BlockID)
+		}
+	}
+}
+
 func (s *State) SetChainValidators(validators *ChainValidators) {
 	s.ChainValidators = validators
 }
@@ -284,11 +310,11 @@ func (s *State) SerializeConsensus(timezone *time.Location) string {
 		}
 
 		// could restart/end the round (cosmos layer) -- “non-locked” or “no-precommit”
-		if validator.RoundVote.Prevote == Voted {
+		if validator.RoundVote.Prevote == VotedForBlock {
 			prevotedAgreed = big.NewFloat(0).Add(prevotedAgreed, validator.Validator.VotingPowerPercent)
 		}
 
-		if validator.RoundVote.Precommit == Voted {
+		if validator.RoundVote.Precommit == VotedForBlock {
 			precommittedAgreed = big.NewFloat(0).Add(precommittedAgreed, validator.Validator.VotingPowerPercent)
 		}
 
@@ -510,4 +536,143 @@ func (s *State) GetValidatorsWithInfoAndAllRoundVotes() ValidatorsWithInfoAndAll
 		Validators:  validators,
 		RoundsVotes: s.ValidatorsWithAllRoundsVotes.RoundsVotes,
 	}
+}
+
+type RoundDataMap struct {
+	mu      *sync.RWMutex
+	heights *butils.SortedMap[int64, *butils.SortedMap[int32, *RoundData]]
+}
+
+type RoundData struct {
+	Proposers butils.Set[string]
+	Votes     map[string]map[cptypes.SignedMsgType]ctypes.BlockID
+}
+
+func NewRoundDataMap() *RoundDataMap {
+	return &RoundDataMap{
+		mu:      &sync.RWMutex{},
+		heights: butils.NewSortedMap[int64, *butils.SortedMap[int32, *RoundData]](),
+	}
+}
+
+type HeightAndRound struct {
+	Height int64
+	Round  int32
+}
+
+func (v *RoundDataMap) Iter() func(yield func(HeightAndRound, *RoundData) bool) {
+	return func(yield func(hr HeightAndRound, rd *RoundData) bool) {
+		v.mu.RLock()
+		defer v.mu.RUnlock()
+
+		for height, heightMap := range v.heights.Iter() {
+			for round, roundData := range heightMap.Iter() {
+				if !yield(HeightAndRound{height, round}, roundData) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (v *RoundDataMap) ReverseIter() func(yield func(HeightAndRound, *RoundData) bool) {
+	return func(yield func(hr HeightAndRound, rd *RoundData) bool) {
+		v.mu.RLock()
+		defer v.mu.RUnlock()
+
+		for height, heightMap := range v.heights.ReverseIter() {
+			for round, roundData := range heightMap.ReverseIter() {
+				if !yield(HeightAndRound{height, round}, roundData) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (v *RoundDataMap) AddProposer(height int64, round int32, proposer string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	roundData := v.upsertRoundData(height, round)
+	roundData.Proposers.Add(proposer)
+}
+
+func (v *RoundDataMap) GetProposers(height int64, round int32) butils.Set[string] {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	roundMap, ok := v.heights.Get(height)
+	if !ok {
+		return nil
+	}
+
+	roundData, ok := roundMap.Get(round)
+	if !ok {
+		return nil
+	}
+
+	return roundData.Proposers.Copy()
+}
+
+func (v *RoundDataMap) AddVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType, blockID ctypes.BlockID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	roundData := v.upsertRoundData(height, round)
+
+	votesMap, ok := roundData.Votes[validator]
+	if !ok {
+		votesMap = map[cptypes.SignedMsgType]ctypes.BlockID{}
+		roundData.Votes[validator] = votesMap
+	}
+
+	votesMap[msgType] = blockID
+}
+
+func (v *RoundDataMap) GetVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType) VoteType {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	roundMap, ok := v.heights.Get(height)
+	if !ok {
+		return NoVote
+	}
+
+	roundData, ok := roundMap.Get(round)
+	if !ok {
+		return NoVote
+	}
+
+	votesMap, ok := roundData.Votes[validator]
+	if !ok {
+		return NoVote
+	}
+
+	blockID, ok := votesMap[msgType]
+	if !ok {
+		return NoVote
+	} else if blockID.IsZero() {
+		return VotedNil
+	}
+	return VotedForBlock
+}
+
+func (v *RoundDataMap) upsertRoundData(height int64, round int32) *RoundData {
+	roundMap, ok := v.heights.Get(height)
+	if !ok {
+		roundMap = butils.NewSortedMap[int32, *RoundData]()
+		v.heights.Insert(height, roundMap)
+	}
+
+	roundData, ok := roundMap.Get(round)
+	if !ok {
+		roundData = &RoundData{
+			Proposers: butils.NewSet[string](),
+			Votes:     make(map[string]map[cptypes.SignedMsgType]ctypes.BlockID),
+		}
+		roundMap.Insert(round, roundData)
+	}
+
+	return roundData
 }

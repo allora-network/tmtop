@@ -270,28 +270,31 @@ func (w *Wrapper) ToggleHelp() {
 }
 
 func (w *Wrapper) SetState(state *types.State) {
-	w.State = state
+	w.App.QueueUpdateDraw(func() {
+		w.State = state
 
-	w.LastRoundTableData.SetValidators(state.GetValidatorsWithInfo(), state.ConsensusStateError)
-	if w.AllRoundsTableData != nil {
-		// Pass both validators and height to AllRoundsTable
-		w.AllRoundsTableData.SetValidators(state.GetValidatorsWithInfoAndAllRoundVotes(), state.Height)
-	}
-	w.NetInfoTableData.SetNetInfo(state.NetInfo)
-	w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
+		w.LastRoundTableData.SetValidators(state.GetValidatorsWithInfo(), state.ConsensusStateError)
+		if w.AllRoundsTableData != nil {
+			w.AllRoundsTableData.SetValidators(state.GetValidatorsWithInfoAndAllRoundVotes(), state.Height)
+			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
+			w.AllRoundsTableData.Update()
+		}
+		w.NetInfoTableData.SetNetInfo(state.NetInfo)
+		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
 
-	w.ConsensusInfoTextView.Clear()
-	w.ChainInfoTextView.Clear()
-	w.ProgressTextView.Clear()
-	_, _ = fmt.Fprint(w.ConsensusInfoTextView, state.SerializeConsensus(w.Timezone))
-	_, _ = fmt.Fprint(w.ChainInfoTextView, state.SerializeChainInfo(w.Timezone))
+		w.ConsensusInfoTextView.Clear()
+		w.ChainInfoTextView.Clear()
+		w.ProgressTextView.Clear()
+		_, _ = fmt.Fprint(w.ConsensusInfoTextView, state.SerializeConsensus(w.Timezone))
+		_, _ = fmt.Fprint(w.ChainInfoTextView, state.SerializeChainInfo(w.Timezone))
 
-	_, _, width, height := w.ConsensusInfoTextView.GetInnerRect()
-	_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrevotesProgressbar(width, height/2))
-	_, _ = fmt.Fprint(w.ProgressTextView, "\n")
-	_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrecommitsProgressbar(width, height/2))
+		_, _, width, height := w.ConsensusInfoTextView.GetInnerRect()
+		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrevotesProgressbar(width, height/2))
+		_, _ = fmt.Fprint(w.ProgressTextView, "\n")
+		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrecommitsProgressbar(width, height/2))
 
-	w.App.Draw()
+		// w.App.Draw()
+	})
 }
 
 func (w *Wrapper) DebugText(text string) {

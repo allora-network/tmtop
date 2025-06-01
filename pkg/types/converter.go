@@ -132,14 +132,14 @@ func ValidatorsWithAllRoundsFromTendermintResponse(
 	}, nil
 }
 
-func VoteFromString(source ConsensusVote) Vote {
+func VoteFromString(source ConsensusVote) VoteType {
 	if source == "nil-Vote" {
 		return VotedNil
 	}
 
 	if strings.Contains(string(source), "SIGNED_MSG_TYPE_PREVOTE(Prevote) 000000000000") {
-		return VotedZero
+		return NoVote
 	}
 
-	return Voted
+	return VotedForBlock
 }

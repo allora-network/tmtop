@@ -1,21 +1,21 @@
 package types
 
-type Vote int
+type VoteType int
 
 const (
-	Voted Vote = iota
+	NoVote VoteType = iota
 	VotedNil
-	VotedZero
+	VotedForBlock
 )
 
-func (v Vote) Serialize(disableEmojis bool) string {
+func (v VoteType) Serialize(disableEmojis bool) string {
 	if disableEmojis {
 		switch v {
-		case Voted:
+		case VotedForBlock:
 			return "[X[]"
-		case VotedZero:
-			return "[0[]"
 		case VotedNil:
+			return "[0[]"
+		case NoVote:
 			return "[ []"
 		default:
 			return ""
@@ -23,11 +23,11 @@ func (v Vote) Serialize(disableEmojis bool) string {
 	}
 
 	switch v {
-	case Voted:
+	case VotedForBlock:
 		return "✅"
-	case VotedZero:
-		return "🤷"
 	case VotedNil:
+		return "🤷"
+	case NoVote:
 		return "❌"
 	default:
 		return ""
