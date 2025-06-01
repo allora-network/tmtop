@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	butils "github.com/brynbellomy/go-utils"
+	comettypes "github.com/cometbft/cometbft/types"
 	"github.com/rs/zerolog"
 )
 
@@ -15,16 +17,18 @@ type Aggregator struct {
 	Config *configPkg.Config
 	Logger zerolog.Logger
 
-	TendermintClient *tendermint.RPC
-	DataFetcher      dataFetcher.DataFetcher
+	TendermintClient  *tendermint.RPC
+	DataFetcher       dataFetcher.DataFetcher
+	CometRPCWebsocket *dataFetcher.CometRPCWebsocket
 }
 
 func NewAggregator(config *configPkg.Config, state *types.State, logger zerolog.Logger) *Aggregator {
 	return &Aggregator{
-		Config:           config,
-		Logger:           logger.With().Str("component", "aggregator").Logger(),
-		TendermintClient: tendermint.NewRPC(config, state, logger),
-		DataFetcher:      dataFetcher.GetDataFetcher(config, state, logger),
+		Config:            config,
+		Logger:            logger.With().Str("component", "aggregator").Logger(),
+		TendermintClient:  tendermint.NewRPC(config, state, logger),
+		DataFetcher:       dataFetcher.GetDataFetcher(config, state, logger),
+		CometRPCWebsocket: dataFetcher.NewCometRPCWebsocket(config.RPCHost, logger),
 	}
 }
 
@@ -86,4 +90,8 @@ func (a *Aggregator) GetBlockTime() (time.Duration, error) {
 
 func (a *Aggregator) GetNetInfo(host string) (*types.NetInfo, error) {
 	return a.DataFetcher.GetNetInfo(host)
+}
+
+func (a *Aggregator) SubscribeCometBFT(mb *butils.Mailbox[comettypes.TMEventData], events ...string) {
+	a.CometRPCWebsocket.Subscribe(mb, events...)
 }

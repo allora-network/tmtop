@@ -1,21 +1,26 @@
 package display
 
 import (
+	"fmt"
 	"main/pkg/types"
 	"main/pkg/utils"
 	"strconv"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/gdamore/tcell/v2"
-
 	"github.com/rivo/tview"
 )
 
 type AllRoundsTableData struct {
 	tview.TableContentReadOnly
 
+	RoundData     *types.RoundDataMap
 	Validators    types.ValidatorsWithInfoAndAllRoundVotes
 	DisableEmojis bool
 	Transpose     bool
+	CurrentHeight int64
+
+	MaxHistorySize int
 
 	cells [][]*tview.TableCell
 	mutex *utils.NoopLocker
@@ -23,11 +28,11 @@ type AllRoundsTableData struct {
 
 func NewAllRoundsTableData(disableEmojis bool, transpose bool) *AllRoundsTableData {
 	return &AllRoundsTableData{
-		Validators:    types.ValidatorsWithInfoAndAllRoundVotes{},
-		DisableEmojis: disableEmojis,
-		Transpose:     transpose,
-		cells:         [][]*tview.TableCell{},
-		mutex:         &utils.NoopLocker{},
+		DisableEmojis:  disableEmojis,
+		Transpose:      transpose,
+		MaxHistorySize: 10,
+		cells:          [][]*tview.TableCell{},
+		mutex:          &utils.NoopLocker{},
 	}
 }
 
@@ -64,84 +69,132 @@ func (d *AllRoundsTableData) GetColumnCount() int {
 	return len(d.cells[0])
 }
 
-func (d *AllRoundsTableData) SetValidators(validators types.ValidatorsWithInfoAndAllRoundVotes) {
-	d.mutex.RLock()
-	if d.Validators.Equals(validators) {
-		return
-	}
-	d.mutex.RUnlock()
-
+func (d *AllRoundsTableData) SetValidators(validators types.ValidatorsWithInfoAndAllRoundVotes, height int64) {
 	d.mutex.Lock()
-	d.Validators = validators
-	d.mutex.Unlock()
 
-	d.redrawCells()
+	if d.CurrentHeight == 0 && height > 0 {
+		d.CurrentHeight = height
+	}
+	d.Validators = validators
+
+	d.mutex.Unlock()
+}
+
+func (d *AllRoundsTableData) SetRoundData(roundData *types.RoundDataMap) {
+	d.mutex.Lock()
+	d.RoundData = roundData
+	d.mutex.Unlock()
 }
 
 func (d *AllRoundsTableData) SetTranspose(transpose bool) {
 	d.mutex.Lock()
 	d.Transpose = transpose
 	d.mutex.Unlock()
-	d.redrawCells()
 }
 
-func (d *AllRoundsTableData) redrawCells() {
-	cells := d.makeCells()
+func (d *AllRoundsTableData) Update() {
+	cells := d.createCells()
 
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.cells = cells
 }
 
-func (d *AllRoundsTableData) makeCells() [][]*tview.TableCell {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
+// Create cells for the table
+func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
+	cells := [][]*tview.TableCell{}
 
-	cells := make([][]*tview.TableCell, len(d.Validators.Validators)+1)
+	if d.Validators.Validators == nil || len(d.Validators.RoundsVotes) == 0 {
+		return cells
+	}
 
-	for row := 0; row < len(d.Validators.Validators)+1; row++ {
-		cells[row] = make([]*tview.TableCell, len(d.Validators.RoundsVotes)+1)
+	// Create header row with bold text
+	headerRow := []*tview.TableCell{
+		tview.NewTableCell("Validator").
+			SetSelectable(false).
+			SetStyle(tcell.StyleDefault.Bold(true)),
+	}
 
-		for column := 0; column < len(d.Validators.RoundsVotes)+1; column++ {
-			round := column - 1
-			if d.Transpose {
-				round = len(d.Validators.RoundsVotes) - column
+	for hr := range d.RoundData.ReverseIter() {
+		// Format height to show only last 4 digits -> this can be adjusted by preference
+		heightStr := strconv.Itoa(int(hr.Height))
+		if len(heightStr) > 4 {
+			heightStr = heightStr[len(heightStr)-4:]
+		}
+
+		headerCell := tview.NewTableCell(fmt.Sprintf("%s.%d", heightStr, hr.Round)).
+			SetSelectable(false).
+			SetStyle(tcell.StyleDefault.Bold(true))
+		headerRow = append(headerRow, headerCell)
+	}
+	cells = append(cells, headerRow)
+
+	// Create validator rows here
+	for i, validator := range d.Validators.Validators {
+		row := []*tview.TableCell{}
+
+		// enumerated validator name
+		name := getValidatorName(validator, i)
+		validatorCell := tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name))
+		row = append(row, validatorCell)
+
+		for _, roundData := range d.RoundData.ReverseIter() {
+			valVotes := roundData.Votes[validator.Validator.Address]
+
+			var prevote types.VoteType
+			if blockID, ok := valVotes[cmtproto.PrevoteType]; !ok {
+				prevote = types.NoVote
+			} else if blockID.IsZero() {
+				prevote = types.VotedNil
+			} else {
+				prevote = types.VotedForBlock
 			}
 
-			// Table header.
-			if row == 0 {
-				text := "validator"
-				if column != 0 {
-					text = strconv.Itoa(round)
-				}
-
-				cells[row][column] = tview.
-					NewTableCell(text).
-					SetAlign(tview.AlignCenter).
-					SetStyle(tcell.StyleDefault.Bold(true))
-				continue
+			var precommit types.VoteType
+			if blockID, ok := valVotes[cmtproto.PrecommitType]; !ok {
+				precommit = types.NoVote
+			} else if blockID.IsZero() {
+				precommit = types.VotedNil
+			} else {
+				precommit = types.VotedForBlock
 			}
 
-			// First column is always validators list.
-			if column == 0 {
-				text := d.Validators.Validators[row-1].Serialize()
-				cell := tview.NewTableCell(text)
-				cells[row][column] = cell
-				continue
-			}
-
-			roundVotes := d.Validators.RoundsVotes[round]
-			roundVote := roundVotes[row-1]
-			text := roundVote.Serialize(d.DisableEmojis)
-
-			cell := tview.NewTableCell(text)
-
-			if roundVote.IsProposer {
+			cell := tview.NewTableCell(" " + precommit.Serialize(d.DisableEmojis) + prevote.Serialize(d.DisableEmojis) + " ")
+			if roundData.Proposers.Has(validator.Validator.Address) {
 				cell.SetBackgroundColor(tcell.ColorForestGreen)
 			}
-
-			cells[row][column] = cell
+			row = append(row, cell)
 		}
+
+		cells = append(cells, row)
 	}
+
 	return cells
+}
+
+// Helper function to get validator name
+func getValidatorName(validator types.ValidatorWithChainValidator, index int) string {
+	name := fmt.Sprintf("Validator %d", index)
+
+	if validator.ChainValidator == nil {
+		return name
+	}
+
+	if validator.ChainValidator.Moniker != "" {
+		return validator.ChainValidator.Moniker
+	}
+
+	if validator.ChainValidator.Address != "" {
+		addr := validator.ChainValidator.Address
+		if len(addr) > 10 {
+			addr = addr[:6] + "..." + addr[len(addr)-4:]
+		}
+		return addr
+	}
+
+	return name
+}
+
+func (d *AllRoundsTableData) HandleKey(event *tcell.EventKey) bool {
+	return false
 }

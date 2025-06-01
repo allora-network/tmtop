@@ -13,7 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brynbellomy/go-utils"
+	butils "github.com/brynbellomy/go-utils"
+	ctypes "github.com/cometbft/cometbft/types"
 	"github.com/rs/zerolog"
 )
 
@@ -26,7 +27,7 @@ type App struct {
 	State          *types.State
 	LogChannel     chan string
 
-	mbRPCURLs        *utils.Mailbox[string]
+	mbRPCURLs        *butils.Mailbox[string]
 	rpcURLsLastFetch map[string]time.Time
 
 	PauseChannel chan bool
@@ -37,12 +38,12 @@ func NewApp(config *configPkg.Config, version string) *App {
 	logChannel := make(chan string, 1000)
 	pauseChannel := make(chan bool)
 
-	state := types.NewState(config.RPCHost)
-
 	logger := loggerPkg.GetLogger(logChannel, config).
 		With().
 		Str("component", "app_manager").
 		Logger()
+
+	state := types.NewState(config.RPCHost, logger)
 
 	return &App{
 		Logger:           logger,
@@ -52,7 +53,7 @@ func NewApp(config *configPkg.Config, version string) *App {
 		DisplayWrapper:   display.NewWrapper(config, state, logger, pauseChannel, version),
 		State:            state,
 		LogChannel:       logChannel,
-		mbRPCURLs:        utils.NewMailbox[string](1000),
+		mbRPCURLs:        butils.NewMailbox[string](1000),
 		rpcURLsLastFetch: make(map[string]time.Time),
 		PauseChannel:     pauseChannel,
 		IsPaused:         false,
@@ -65,7 +66,7 @@ func (a *App) Start() {
 		topology.LogChannel = a.LogChannel
 	}
 
-	go a.CrawlRPCURLs()
+	// go a.CrawlRPCURLs()
 
 	go a.GoRefreshConsensus()
 	go a.GoRefreshValidators()
@@ -73,6 +74,7 @@ func (a *App) Start() {
 	go a.GoRefreshUpgrade()
 	go a.GoRefreshBlockTime()
 	go a.GoRefreshNetInfo()
+	go a.SubscribeCometBFT()
 	go a.DisplayLogs()
 	go a.ListenForPause()
 
@@ -398,6 +400,23 @@ func (a *App) RefreshNetInfo() {
 
 	a.State.SetNetInfo(netInfo)
 	a.DisplayWrapper.SetState(a.State)
+}
+
+func (a *App) SubscribeCometBFT() {
+	defer a.HandlePanic()
+
+	mbEvents := butils.NewMailbox[ctypes.TMEventData](1000)
+	a.Aggregator.SubscribeCometBFT(mbEvents, "Vote")
+	a.Aggregator.SubscribeCometBFT(mbEvents, "NewRound")
+
+	for {
+		select {
+		case <-mbEvents.Notify():
+			events := mbEvents.RetrieveAll()
+			a.State.AddCometBFTEvents(events)
+			a.DisplayWrapper.SetState(a.State)
+		}
+	}
 }
 
 func (a *App) DisplayLogs() {

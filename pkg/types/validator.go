@@ -22,8 +22,8 @@ type Validators []Validator
 
 type RoundVote struct {
 	Address    string
-	Prevote    Vote
-	Precommit  Vote
+	Prevote    VoteType
+	Precommit  VoteType
 	IsProposer bool
 }
 
@@ -93,7 +93,7 @@ func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrevotedPercent(countDisagre
 
 	for _, validator := range v {
 		totalVP = totalVP.Add(totalVP, validator.Validator.VotingPower)
-		if validator.RoundVote.Prevote == Voted || (countDisagreeing && validator.RoundVote.Prevote == VotedZero) {
+		if validator.RoundVote.Prevote == VotedForBlock || (countDisagreeing && validator.RoundVote.Prevote == NoVote) {
 			prevoted = prevoted.Add(prevoted, validator.Validator.VotingPower)
 		}
 	}
@@ -111,7 +111,7 @@ func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrecommittedPercent(countDis
 
 	for _, validator := range v {
 		totalVP = totalVP.Add(totalVP, validator.Validator.VotingPower)
-		if validator.RoundVote.Precommit == Voted || (countDisagreeing && validator.RoundVote.Precommit == VotedZero) {
+		if validator.RoundVote.Precommit == VotedForBlock || (countDisagreeing && validator.RoundVote.Precommit == NoVote) {
 			precommitted = precommitted.Add(precommitted, validator.Validator.VotingPower)
 		}
 	}

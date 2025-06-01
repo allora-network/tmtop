@@ -41,7 +41,11 @@ func (w Writer) Write(msg []byte) (int, error) {
 
 	if w.DebugFile != nil {
 		if _, err := w.DebugFile.Write(msg); err != nil {
-			return 0, err
+			panic(err)
+		}
+		err := w.DebugFile.Sync()
+		if err != nil {
+			panic(err)
 		}
 	}
 
