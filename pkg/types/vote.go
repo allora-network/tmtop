@@ -1,21 +1,45 @@
 package types
 
-type VoteType int
-
-const (
-	NoVote VoteType = iota
-	VotedNil
-	VotedForBlock
+import (
+	cptypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	ctypes "github.com/cometbft/cometbft/types"
 )
 
-func (v VoteType) Serialize(disableEmojis bool) string {
+// VoteState represents the state of a validator's vote using CometBFT types directly
+type VoteState int
+
+const (
+	VoteStateNone VoteState = iota
+	VoteStateNil
+	VoteStateForBlock
+)
+
+// VoteStateFromCometBFT determines vote state from CometBFT types
+func VoteStateFromCometBFT(voteExists bool, blockID ctypes.BlockID) VoteState {
+	if !voteExists {
+		return VoteStateNone
+	}
+	if blockID.IsZero() {
+		return VoteStateNil
+	}
+	return VoteStateForBlock
+}
+
+// VoteStateFromVotesMap determines vote state from votes map
+func VoteStateFromVotesMap(votesMap map[cptypes.SignedMsgType]ctypes.BlockID, msgType cptypes.SignedMsgType) VoteState {
+	blockID, exists := votesMap[msgType]
+	return VoteStateFromCometBFT(exists, blockID)
+}
+
+// Serialize returns UI representation of vote state
+func (v VoteState) Serialize(disableEmojis bool) string {
 	if disableEmojis {
 		switch v {
-		case VotedForBlock:
+		case VoteStateForBlock:
 			return "[X[]"
-		case VotedNil:
+		case VoteStateNil:
 			return "[0[]"
-		case NoVote:
+		case VoteStateNone:
 			return "[ []"
 		default:
 			return ""
@@ -23,13 +47,14 @@ func (v VoteType) Serialize(disableEmojis bool) string {
 	}
 
 	switch v {
-	case VotedForBlock:
+	case VoteStateForBlock:
 		return "✅"
-	case VotedNil:
+	case VoteStateNil:
 		return "🤷"
-	case NoVote:
+	case VoteStateNone:
 		return "❌"
 	default:
 		return ""
 	}
 }
+

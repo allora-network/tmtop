@@ -87,8 +87,6 @@ github.com/bgentry/speakeasy v0.1.1-0.20220910012023-760eaf8b6816 h1:41iFGWnSlI2
 github.com/bgentry/speakeasy v0.1.1-0.20220910012023-760eaf8b6816/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
 github.com/bits-and-blooms/bitset v1.8.0 h1:FD+XqgOZDUxxZ8hzoBFuV9+cGWY9CslN6d5MS5JVb4c=
 github.com/bits-and-blooms/bitset v1.8.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
-github.com/brynbellomy/go-utils v0.0.0-20250530002545-8cae5b555888 h1:yZdbroSInYe0GxrJ6xWHH/uDtzFi6kigQ2BOvMfG1b0=
-github.com/brynbellomy/go-utils v0.0.0-20250530002545-8cae5b555888/go.mod h1:nqSUwdZrKkc5BuR0+5hCwAN6Z8QzyYCFteGXOaYt7Tw=
 github.com/brynbellomy/go-utils v0.0.0-20250601013634-e8cb1848c310 h1:MInVUV72+bB0DfEtogUkxq2MPZFF8H+nMAjx/EHXeH0=
 github.com/brynbellomy/go-utils v0.0.0-20250601013634-e8cb1848c310/go.mod h1:nqSUwdZrKkc5BuR0+5hCwAN6Z8QzyYCFteGXOaYt7Tw=
 github.com/btcsuite/btcd/btcec/v2 v2.3.2 h1:5n0X6hX0Zk+6omWcihdYvdAlGf2DfasC0GMf7DClJ3U=
@@ -448,8 +446,6 @@ github.com/hudl/fargo v1.3.0/go.mod h1:y3CKSmjA+wD2gak7sUSXTAoopbhU08POFhmITJgmK
 github.com/iancoleman/strcase v0.3.0 h1:nTXanmYxhfFAMjZL34Ov6gkzEsSJZ5DbhxWjvSASxEI=
 github.com/iancoleman/strcase v0.3.0/go.mod h1:iwCmte+B7n89clKwxIoIXy/HfoL7AsD47ZCWhYzw7ho=
 github.com/ianlancetaylor/demangle v0.0.0-20200824232613-28f6c0f3b639/go.mod h1:aSSvb/t6k1mPoxDqO4vJh6VOCGPwU4O0C2/Eqndh1Sc=
-github.com/ietxaniz/delock v0.3.0 h1:PJiwiOtmYrtMPJAmgPRkvOAyOI8KQB0NG38+piQfTFU=
-github.com/ietxaniz/delock v0.3.0/go.mod h1:zJuHarV3NdiZD7szgx7yYGLGiLn0I6IHhiomHbYfa7I=
 github.com/improbable-eng/grpc-web v0.15.0 h1:BN+7z6uNXZ1tQGcNAuaU1YjsLTApzkjt2tzCixLaUPQ=
 github.com/improbable-eng/grpc-web v0.15.0/go.mod h1:1sy9HKV4Jt9aEs9JSnkWlRJPuPtwNr0l57L4f878wP8=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=

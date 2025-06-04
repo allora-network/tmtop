@@ -14,12 +14,10 @@ require (
 	github.com/gdamore/tcell/v2 v2.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/ietxaniz/delock v0.3.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/rivo/tview v0.0.0-20231022175332-f7f32ad28104
 	github.com/rs/zerolog v1.33.0
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/exp v0.0.0-20250531010427-b6e5de432a8b
 	gonum.org/v1/gonum v0.15.1
 )
 
@@ -153,6 +151,7 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.32.0 // indirect
+	golang.org/x/exp v0.0.0-20250531010427-b6e5de432a8b // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
