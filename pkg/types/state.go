@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 	"maps"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -19,28 +18,35 @@ import (
 type State struct {
 	logger zerolog.Logger
 
-	Height                       int64
-	Round                        int64
-	Step                         int64
-	Validators                   *ValidatorsWithRoundVote
-	ValidatorsWithAllRoundsVotes *ValidatorsWithAllRoundsVotes
-	ChainValidators              *ChainValidators
-	ChainInfo                    *TendermintStatusResult
-	StartTime                    time.Time
-	Upgrade                      *Upgrade
-	BlockTime                    time.Duration
-	NetInfo                      *NetInfo
+	Height    int64
+	Round     int64
+	Step      int64
+	StartTime time.Time
 
+	// Unified validator collection
+	TMValidators TMValidators
+
+	// Chain metadata
+	ChainValidators *ChainValidators
+	ChainInfo       *TendermintStatusResult
+	Upgrade         *Upgrade
+	BlockTime       time.Duration
+	NetInfo         *NetInfo
+
+	// Vote and proposal tracking
 	VotesByRound     *RoundDataMap
 	ProposalsByRound *butils.SortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]]
 
-	validatorsByPeerID map[string]Validator
+	// Simplified validator tracking
+	validatorsByPeerID map[string]TMValidator
 
+	// RPC management
 	currentRPC string
 	knownRPCs  *butils.OrderedMap[string, RPC]
 	rpcPeers   *butils.OrderedMap[string, []Peer]
 	muRPCs     *sync.RWMutex
 
+	// Error tracking
 	ConsensusStateError  error
 	ValidatorsError      error
 	ChainValidatorsError error
@@ -72,13 +78,13 @@ func NewState(firstRPC string, logger zerolog.Logger) *State {
 		Height:             0,
 		Round:              0,
 		Step:               0,
-		Validators:         nil,
+		StartTime:          time.Now(),
+		TMValidators:       TMValidators{},
 		ChainValidators:    nil,
 		VotesByRound:       NewRoundDataMap(),
 		ProposalsByRound:   butils.NewSortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]](),
-		validatorsByPeerID: make(map[string]Validator),
-		StartTime:          time.Now(),
 		BlockTime:          0,
+		validatorsByPeerID: make(map[string]TMValidator),
 		currentRPC:         firstRPC,
 		knownRPCs:          butils.NewOrderedMap[string, RPC](),
 		rpcPeers:           butils.NewOrderedMap[string, []Peer](),
@@ -90,8 +96,7 @@ func (s *State) Clear() {
 	s.Height = 0
 	s.Round = 0
 	s.Step = 0
-	s.Validators = nil
-	s.ValidatorsWithAllRoundsVotes = nil
+	s.TMValidators = TMValidators{}
 	s.ChainValidators = nil
 	s.ChainInfo = nil
 	s.StartTime = time.Now()
@@ -176,48 +181,17 @@ func (s *State) RPCPeers(rpcURL string) []Peer {
 	return peers
 }
 
-func (s *State) ValidatorByPeerID(peerID string) (Validator, bool) {
+func (s *State) ValidatorByPeerID(peerID string) (TMValidator, bool) {
 	val, ok := s.validatorsByPeerID[strings.ToLower(peerID)]
 	return val, ok
 }
 
-func (s *State) ValidatorsByPeerID() map[string]Validator {
+func (s *State) ValidatorsByPeerID() map[string]TMValidator {
 	return maps.Clone(s.validatorsByPeerID)
 }
 
-func (s *State) SetTendermintResponse(
-	consensus *ConsensusStateResponse,
-	tendermintValidators []TendermintValidator,
-) error {
-	hrsSplit := strings.Split(consensus.Result.RoundState.HeightRoundStep, "/")
-
-	s.Height = utils.MustParseInt64(hrsSplit[0])
-	s.Round = utils.MustParseInt64(hrsSplit[1])
-	s.Step = utils.MustParseInt64(hrsSplit[2])
-	s.StartTime = consensus.Result.RoundState.StartTime
-
-	validators, err := ValidatorsWithLatestRoundFromTendermintResponse(consensus, tendermintValidators, s.Round)
-	if err != nil {
-		return err
-	}
-
-	s.Validators = &validators
-
-	validatorsWithAllRounds, err := ValidatorsWithAllRoundsFromTendermintResponse(consensus, tendermintValidators)
-	if err != nil {
-		return err
-	}
-
-	s.ValidatorsWithAllRoundsVotes = &validatorsWithAllRounds
-
-	for _, val := range validators {
-		s.validatorsByPeerID[strings.ToLower(string(val.Validator.PeerID))] = val.Validator
-	}
-
-	return nil
-}
-
 func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
+	s.logger.Error().Msg("AddCometBFTEvents")
 	for _, event := range events {
 		switch x := event.(type) {
 		case ctypes.EventDataNewRound:
@@ -270,7 +244,7 @@ func (s *State) SerializeConsensus(timezone *time.Location) string {
 		return fmt.Sprintf(" consensus state error: %s", s.ConsensusStateError)
 	}
 
-	if s.Validators == nil {
+	if len(s.TMValidators) == 0 {
 		return ""
 	}
 
@@ -282,70 +256,16 @@ func (s *State) SerializeConsensus(timezone *time.Location) string {
 		utils.ZeroOrPositiveDuration(utils.SerializeDuration(time.Since(s.StartTime))),
 		utils.SerializeTime(s.StartTime.In(timezone)),
 	))
+
 	sb.WriteString(fmt.Sprintf(
 		" prevote consensus (total/agreeing): %.2f / %.2f\n",
-		s.Validators.GetTotalVotingPowerPrevotedPercent(true),
-		s.Validators.GetTotalVotingPowerPrevotedPercent(false),
+		s.TMValidators.GetTotalVotingPowerPrevotedPercent(true),
+		s.TMValidators.GetTotalVotingPowerPrevotedPercent(false),
 	))
 	sb.WriteString(fmt.Sprintf(
 		" precommit consensus (total/agreeing): %.2f / %.2f\n",
-		s.Validators.GetTotalVotingPowerPrecommittedPercent(true),
-		s.Validators.GetTotalVotingPowerPrecommittedPercent(false),
-	))
-
-	var (
-		prevoted           *big.Float = big.NewFloat(0)
-		precommitted       *big.Float = big.NewFloat(0)
-		prevotedAgreed     *big.Float = big.NewFloat(0)
-		precommittedAgreed *big.Float = big.NewFloat(0)
-	)
-
-	for _, validator := range *s.Validators {
-		// keeps round alive, didn't see valid proposal (tendermint layer)
-		if validator.RoundVote.Prevote != VotedNil {
-			prevoted = big.NewFloat(0).Add(prevoted, validator.Validator.VotingPowerPercent)
-		}
-		if validator.RoundVote.Precommit != VotedNil {
-			precommitted = big.NewFloat(0).Add(precommitted, validator.Validator.VotingPowerPercent)
-		}
-
-		// could restart/end the round (cosmos layer) -- “non-locked” or “no-precommit”
-		if validator.RoundVote.Prevote == VotedForBlock {
-			prevotedAgreed = big.NewFloat(0).Add(prevotedAgreed, validator.Validator.VotingPowerPercent)
-		}
-
-		if validator.RoundVote.Precommit == VotedForBlock {
-			precommittedAgreed = big.NewFloat(0).Add(precommittedAgreed, validator.Validator.VotingPowerPercent)
-		}
-
-		// In summary, a **nil vote** reflects that the validator participated but
-		// saw no valid proposal, keeping the round alive, while a **zero vote**
-		// (if referenced) signals a form of abstention or absence of a decision,
-		// which could force the round to restart or timeout.
-	}
-
-	mustFloat := func(x *big.Float) float64 {
-		blah, _ := x.Float64()
-		return blah
-	}
-
-	sb.WriteString(fmt.Sprintf(
-		" prevoted/precommitted: %0.2f/%0.2f (out of %0.2f / %0.2f - %0.2f / %0.2f)\n",
-		mustFloat(prevoted),
-		mustFloat(precommitted),
-		mustFloat(s.Validators.GetTotalVotingPowerPrevotedPercent(true)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrecommittedPercent(true)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrevotedPercent(false)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrecommittedPercent(false)),
-	))
-	sb.WriteString(fmt.Sprintf(
-		" prevoted/precommitted agreed: %0.2f/%0.2f (out of %0.2f / %0.02f - %0.2f / %0.2f)\n",
-		mustFloat(prevotedAgreed),
-		mustFloat(precommittedAgreed),
-		mustFloat(s.Validators.GetTotalVotingPowerPrevotedPercent(true)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrecommittedPercent(true)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrevotedPercent(false)),
-		mustFloat(s.Validators.GetTotalVotingPowerPrecommittedPercent(false)),
+		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true),
+		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(false),
 	))
 
 	sb.WriteString(fmt.Sprintf(" last updated at: %s\n", utils.SerializeTime(time.Now().In(timezone))))
@@ -454,11 +374,11 @@ func (s *State) SerializeProgressbar(width int, height int, prefix string, progr
 }
 
 func (s *State) SerializePrevotesProgressbar(width int, height int) string {
-	if s.Validators == nil {
+	if len(s.TMValidators) == 0 {
 		return ""
 	}
 
-	prevotePercent := s.Validators.GetTotalVotingPowerPrevotedPercent(true)
+	prevotePercent := s.TMValidators.GetTotalVotingPowerPrevotedPercent(true)
 	prevotePercentFloat, _ := prevotePercent.Float64()
 	prevotePercentInt := int(prevotePercentFloat)
 
@@ -466,75 +386,58 @@ func (s *State) SerializePrevotesProgressbar(width int, height int) string {
 }
 
 func (s *State) SerializePrecommitsProgressbar(width int, height int) string {
-	if s.Validators == nil {
+	if len(s.TMValidators) == 0 {
 		return ""
 	}
 
-	precommitPercent := s.Validators.GetTotalVotingPowerPrecommittedPercent(true)
+	precommitPercent := s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true)
 	precommitPercentFloat, _ := precommitPercent.Float64()
 	precommitPercentInt := int(precommitPercentFloat)
 
 	return s.SerializeProgressbar(width, height, "Precommits: ", precommitPercentInt)
 }
 
-func (s *State) GetValidatorsWithInfo() ValidatorsWithInfo {
-	if s.Validators == nil {
-		return ValidatorsWithInfo{}
-	}
+// TMValidator-based methods
 
-	validators := make(ValidatorsWithInfo, len(*s.Validators))
-
-	for index, validator := range *s.Validators {
-		validators[index] = ValidatorWithInfo{
-			Validator: validator.Validator,
-			RoundVote: validator.RoundVote,
-		}
-	}
-
-	if s.ChainValidators == nil {
-		return validators
-	}
-
-	chainValidatorsMap := s.ChainValidators.ToMap()
-	for index, validator := range *s.Validators {
-		if chainValidator, ok := chainValidatorsMap[validator.Validator.Address]; ok {
-			validators[index].ChainValidator = &chainValidator
-		}
-	}
-
-	return validators
+// GetTMValidators returns the unified validator collection
+func (s *State) GetTMValidators() TMValidators {
+	return s.TMValidators
 }
 
-func (s *State) GetValidatorsWithInfoAndAllRoundVotes() ValidatorsWithInfoAndAllRoundVotes {
-	if s.ValidatorsWithAllRoundsVotes == nil {
-		return ValidatorsWithInfoAndAllRoundVotes{}
-	}
+// SetTMValidators sets the unified validator collection
+func (s *State) SetTMValidators(validators TMValidators) {
+	s.TMValidators = validators
+}
 
-	validators := make([]ValidatorWithChainValidator, len(s.ValidatorsWithAllRoundsVotes.Validators))
+// UpdateTMValidatorsWithRoundVotes updates current round vote state for all validators
+func (s *State) UpdateTMValidatorsWithRoundVotes(height int64, round int32) {
+	for i := range s.TMValidators {
+		validator := &s.TMValidators[i]
 
-	for index, validator := range s.ValidatorsWithAllRoundsVotes.Validators {
-		validators[index] = ValidatorWithChainValidator{
-			Validator: validator,
+		// Create current round vote state from VotesByRound data
+		roundVoteState := &RoundVoteState{
+			Address:    validator.GetDisplayAddress(),
+			Prevote:    s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrevoteType),
+			Precommit:  s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrecommitType),
+			IsProposer: s.VotesByRound.GetProposers(height, round).Has(validator.GetDisplayAddress()),
 		}
-	}
 
+		validator.CurrentRoundVote = roundVoteState
+	}
+}
+
+// SyncTMValidatorsWithChainValidators updates TMValidators with chain validator metadata
+func (s *State) SyncTMValidatorsWithChainValidators() {
 	if s.ChainValidators == nil {
-		return ValidatorsWithInfoAndAllRoundVotes{
-			Validators:  validators,
-			RoundsVotes: s.ValidatorsWithAllRoundsVotes.RoundsVotes,
-		}
+		return
 	}
 
 	chainValidatorsMap := s.ChainValidators.ToMap()
-	for index, validator := range s.ValidatorsWithAllRoundsVotes.Validators {
-		if chainValidator, ok := chainValidatorsMap[validator.Address]; ok {
-			validators[index].ChainValidator = &chainValidator
+	for i := range s.TMValidators {
+		validator := &s.TMValidators[i]
+		if chainValidator, ok := chainValidatorsMap[validator.GetDisplayAddress()]; ok {
+			validator.ChainValidator = &chainValidator
 		}
-	}
-
-	return ValidatorsWithInfoAndAllRoundVotes{
-		Validators:  validators,
-		RoundsVotes: s.ValidatorsWithAllRoundsVotes.RoundsVotes,
 	}
 }
 
@@ -630,32 +533,32 @@ func (v *RoundDataMap) AddVote(height int64, round int32, validator string, msgT
 	votesMap[msgType] = blockID
 }
 
-func (v *RoundDataMap) GetVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType) VoteType {
+func (v *RoundDataMap) GetVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType) VoteState {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	roundMap, ok := v.heights.Get(height)
 	if !ok {
-		return NoVote
+		return VoteStateNone
 	}
 
 	roundData, ok := roundMap.Get(round)
 	if !ok {
-		return NoVote
+		return VoteStateNone
 	}
 
 	votesMap, ok := roundData.Votes[validator]
 	if !ok {
-		return NoVote
+		return VoteStateNone
 	}
 
 	blockID, ok := votesMap[msgType]
 	if !ok {
-		return NoVote
+		return VoteStateNone
 	} else if blockID.IsZero() {
-		return VotedNil
+		return VoteStateNil
 	}
-	return VotedForBlock
+	return VoteStateForBlock
 }
 
 func (v *RoundDataMap) upsertRoundData(height int64, round int32) *RoundData {

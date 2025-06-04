@@ -145,21 +145,13 @@ func (f *CosmosRPCDataFetcher) GetValidators() (*types.ChainValidators, error) {
 
 	validators := make(types.ChainValidators, len(validatorsResponse.Validators))
 
-	// fx, err := os.Create("/tmp/blah")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer fx.Close()
 	for index, validator := range validatorsResponse.Validators {
 		if chainValidator, err := f.ParseValidator(validator); err != nil {
 			return nil, err
 		} else {
 			validators[index] = chainValidator
 		}
-		// fmt.Println(len(string(validator.ConsensusPubkey.Value)))
-		// fx.Write([]byte(validatorAddr(validator.ConsensusPubkey.Value) + "\n"))
 	}
-	// os.Exit(0)
 
 	if !f.Config.IsConsumer() {
 		return &validators, nil
