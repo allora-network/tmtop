@@ -1,4 +1,4 @@
-package tendermint
+package fetcher
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-type RPC struct {
+type TendermintRPC struct {
 	Config     *configPkg.Config
 	State      *types.State
 	Logger     zerolog.Logger
@@ -22,8 +22,8 @@ type RPC struct {
 	LogChannel chan string
 }
 
-func NewRPC(config *configPkg.Config, state *types.State, logger zerolog.Logger) *RPC {
-	return &RPC{
+func NewTendermintRPC(config *configPkg.Config, state *types.State, logger zerolog.Logger) *TendermintRPC {
+	return &TendermintRPC{
 		Config: config,
 		State:  state,
 		Logger: logger.With().Str("component", "tendermint_rpc").Logger(),
@@ -31,11 +31,11 @@ func NewRPC(config *configPkg.Config, state *types.State, logger zerolog.Logger)
 	}
 }
 
-func (rpc *RPC) client() *http.Client {
+func (rpc *TendermintRPC) client() *http.Client {
 	return http.NewClient(rpc.Logger, "tendermint_rpc", rpc.State.CurrentRPC().URL)
 }
 
-func (rpc *RPC) GetConsensusState() (*types.ConsensusStateResponse, error) {
+func (rpc *TendermintRPC) GetConsensusState() (*types.ConsensusStateResponse, error) {
 	var response types.ConsensusStateResponse
 	if err := rpc.client().Get("/consensus_state", &response); err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (rpc *RPC) GetConsensusState() (*types.ConsensusStateResponse, error) {
 	return &response, nil
 }
 
-func (rpc *RPC) GetValidators() ([]types.TendermintValidator, error) {
+func (rpc *TendermintRPC) GetValidators() ([]types.TendermintValidator, error) {
 	page := 1
 
 	validators := make([]types.TendermintValidator, 0)
@@ -88,7 +88,7 @@ func (rpc *RPC) GetValidators() ([]types.TendermintValidator, error) {
 	return validators, nil
 }
 
-func (rpc *RPC) GetValidatorsViaDumpConsensusState() ([]types.TendermintValidator, error) {
+func (rpc *TendermintRPC) GetValidatorsViaDumpConsensusState() ([]types.TendermintValidator, error) {
 	var response types.DumpConsensusStateResponse
 	if err := rpc.client().Get("/dump_consensus_state", &response); err != nil {
 		return nil, err
@@ -103,7 +103,7 @@ func (rpc *RPC) GetValidatorsViaDumpConsensusState() ([]types.TendermintValidato
 	return response.Result.RoundState.Validators.Validators, nil
 }
 
-func (rpc *RPC) GetStatus(rpcURL string) (*types.TendermintStatusResponse, error) {
+func (rpc *TendermintRPC) GetStatus(rpcURL string) (*types.TendermintStatusResponse, error) {
 	client := http.NewClient(rpc.Logger, "tendermint_rpc", rpcURL)
 
 	var response types.TendermintStatusResponse
@@ -114,7 +114,7 @@ func (rpc *RPC) GetStatus(rpcURL string) (*types.TendermintStatusResponse, error
 	return &response, nil
 }
 
-func (rpc *RPC) GetValidatorsAtPage(page int) (*types.ValidatorsResponse, error) {
+func (rpc *TendermintRPC) GetValidatorsAtPage(page int) (*types.ValidatorsResponse, error) {
 	var response types.ValidatorsResponse
 	if err := rpc.client().Get(fmt.Sprintf("/validators?page=%d&per_page=100", page), &response); err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (rpc *RPC) GetValidatorsAtPage(page int) (*types.ValidatorsResponse, error)
 	return &response, nil
 }
 
-func (rpc *RPC) Block(height int64) (types.TendermintBlockResponse, error) {
+func (rpc *TendermintRPC) Block(height int64) (types.TendermintBlockResponse, error) {
 	blockURL := "/block"
 	if height != 0 {
 		blockURL = fmt.Sprintf("/block?height=%d", height)
@@ -134,7 +134,7 @@ func (rpc *RPC) Block(height int64) (types.TendermintBlockResponse, error) {
 	return res, err
 }
 
-func (rpc *RPC) GetBlockTime() (time.Duration, error) {
+func (rpc *TendermintRPC) GetBlockTime() (time.Duration, error) {
 	latestBlock, err := rpc.Block(0)
 	if err != nil {
 		rpc.Logger.Error().Err(err).Msg("Could not fetch current block")

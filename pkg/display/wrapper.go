@@ -15,15 +15,15 @@ import (
 
 const (
 	ModeLastRound = iota
-	ModeAllRounds = iota
-	ModeNetInfo   = iota
+	ModeAllRounds
+	ModeNetInfo
 )
 
 const (
 	DefaultColumnsCount = 3
 	RowsAmount          = 10
 	DebugBlockHeight    = 8
-	DefaultMode         = ModeLastRound
+	DefaultMode         = ModeAllRounds
 )
 
 type Wrapper struct {
@@ -175,8 +175,9 @@ func (w *Wrapper) Start() {
 	})
 
 	w.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == 'q' {
+		if event.Rune() == 'q' || event.Key() == tcell.KeyCtrlC {
 			w.App.Stop()
+			return nil
 		}
 
 		if event.Rune() == 'd' {
@@ -250,7 +251,8 @@ func (w *Wrapper) Start() {
 	})
 
 	if err := w.App.Run(); err != nil {
-		w.Logger.Fatal().Err(err).Msg("Could not draw screen")
+		w.Logger.Error().Err(err).Msg("Could not draw screen")
+		w.cleanup()
 	}
 }
 
@@ -273,9 +275,10 @@ func (w *Wrapper) SetState(state *types.State) {
 	w.App.QueueUpdateDraw(func() {
 		w.State = state
 
-		w.LastRoundTableData.SetValidators(state.GetValidatorsWithInfo(), state.ConsensusStateError)
+		// Use TMValidators
+		w.LastRoundTableData.SetTMValidators(state.GetTMValidators(), state.ConsensusStateError)
 		if w.AllRoundsTableData != nil {
-			w.AllRoundsTableData.SetValidators(state.GetValidatorsWithInfoAndAllRoundVotes(), state.Height)
+			w.AllRoundsTableData.SetTMValidators(state.GetTMValidators(), state.Height)
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
 			w.AllRoundsTableData.Update()
 		}
@@ -327,13 +330,13 @@ func (w *Wrapper) ChangeColumnsCount(increase bool) {
 func (w *Wrapper) ChangeMode() {
 	switch w.Mode {
 	case ModeAllRounds:
-		w.Mode = ModeLastRound
-	case ModeLastRound:
 		w.Mode = ModeNetInfo
 	case ModeNetInfo:
+		w.Mode = ModeLastRound
+	case ModeLastRound:
 		w.Mode = ModeAllRounds
 	default:
-		w.Mode = ModeLastRound
+		w.Mode = ModeAllRounds
 	}
 
 	w.Redraw()
@@ -354,9 +357,9 @@ func (w *Wrapper) Redraw() {
 	w.Grid.RemoveItem(w.AllRoundsTable)
 	w.Grid.RemoveItem(w.DebugTextView)
 
-	w.Grid.AddItem(w.ConsensusInfoTextView, 0, 0, w.InfoBlockWidth, 2, 1, 1, false)
-	w.Grid.AddItem(w.ChainInfoTextView, 0, 2, w.InfoBlockWidth, 2, 1, 1, false)
-	w.Grid.AddItem(w.ProgressTextView, 0, 4, w.InfoBlockWidth, 2, 1, 1, false)
+	w.Grid.AddItem(w.ConsensusInfoTextView, 0, 0, w.InfoBlockWidth, 3, 1, 1, false)
+	w.Grid.AddItem(w.ChainInfoTextView, 0, 3, w.InfoBlockWidth, 2, 1, 1, false)
+	w.Grid.AddItem(w.ProgressTextView, 0, 5, w.InfoBlockWidth, 1, 1, 1, false)
 
 	if w.DebugEnabled {
 		w.Grid.AddItem(
@@ -413,4 +416,25 @@ func (w *Wrapper) Redraw() {
 		w.Pages.RemovePage("rpclist")
 		w.App.SetFocus(table)
 	}
+}
+
+// cleanup ensures proper terminal state restoration
+func (w *Wrapper) cleanup() {
+	if w.App != nil {
+		// Stop the application gracefully
+		w.App.Stop()
+	}
+
+	// Additional terminal cleanup
+	w.restoreTerminal()
+}
+
+// restoreTerminal restores terminal state
+func (w *Wrapper) restoreTerminal() {
+	// Send terminal reset sequences to restore state
+	fmt.Print("\033[?25h")   // Show cursor
+	fmt.Print("\033[0m")     // Reset colors
+	fmt.Print("\033[2J")     // Clear screen
+	fmt.Print("\033[H")      // Move cursor to top-left
+	fmt.Print("\033[?1049l") // Exit alternate screen buffer
 }

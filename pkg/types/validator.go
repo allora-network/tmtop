@@ -7,94 +7,113 @@ import (
 	"strconv"
 
 	"github.com/cometbft/cometbft/p2p"
+	ctypes "github.com/cometbft/cometbft/types"
 )
 
-type Validator struct {
-	Index              int
-	Address            string
-	VotingPower        *big.Int
-	VotingPowerPercent *big.Float
-	PubKey             []byte
-	PeerID             p2p.ID
+
+// TMValidator represents a unified validator type based on CometBFT with tmtop extensions
+type TMValidator struct {
+	// Core CometBFT validator data
+	ctypes.Validator
+
+	// tmtop-specific fields
+	Index              int              // Display index for UI
+	VotingPowerPercent *big.Float       // Calculated percentage
+	PeerID             p2p.ID           // P2P network ID
+
+	// Optional chain-specific metadata
+	ChainValidator *ChainValidator     // Moniker, assigned addresses, etc.
+
+	// Current round vote state (optional)
+	CurrentRoundVote *RoundVoteState   // Vote state for current round
 }
 
-type Validators []Validator
-
-type RoundVote struct {
-	Address    string
-	Prevote    VoteType
-	Precommit  VoteType
-	IsProposer bool
+// GetDisplayAddress returns the best available address for display
+func (v TMValidator) GetDisplayAddress() string {
+	return v.Address.String()
 }
 
-func (v RoundVote) Equals(other RoundVote) bool {
-	if v.Address != other.Address {
-		return false
+// GetDisplayName returns the best available name for display
+func (v TMValidator) GetDisplayName() string {
+	if v.ChainValidator != nil && v.ChainValidator.Moniker != "" {
+		return v.ChainValidator.Moniker
 	}
-
-	if v.Prevote != other.Prevote {
-		return false
+	// Truncate address for display
+	addr := v.GetDisplayAddress()
+	if len(addr) > 10 {
+		return addr[:6] + "..." + addr[len(addr)-4:]
 	}
-
-	if v.Precommit != other.Precommit {
-		return false
-	}
-
-	if v.IsProposer != other.IsProposer {
-		return false
-	}
-
-	return false
+	return addr
 }
-func (v RoundVote) Serialize(disableEmojis bool) string {
+
+// HasAssignedKey returns true if validator has an assigned consensus key
+func (v TMValidator) HasAssignedKey() bool {
+	return v.ChainValidator != nil && v.ChainValidator.AssignedAddress != ""
+}
+
+// Serialize returns formatted string for display (replaces ValidatorWithInfo.Serialize)
+func (v TMValidator) Serialize(disableEmojis bool) string {
+	name := v.GetDisplayName()
+	if v.HasAssignedKey() {
+		emoji := "🔑"
+		if disableEmojis {
+			emoji = "[k[]"
+		}
+		name = emoji + " " + name
+	}
+
+	// If no current round vote state, show placeholders
+	prevoteStr := "❌"
+	precommitStr := "❌"
+	if disableEmojis {
+		prevoteStr = "[ []"
+		precommitStr = "[ []"
+	}
+
+	if v.CurrentRoundVote != nil {
+		prevoteStr = v.CurrentRoundVote.Prevote.Serialize(disableEmojis)
+		precommitStr = v.CurrentRoundVote.Precommit.Serialize(disableEmojis)
+	}
+
+	// Format voting power percentage
+	votingPowerStr := "0.00"
+	if v.VotingPowerPercent != nil {
+		votingPowerStr = v.VotingPowerPercent.Text('f', 2)
+	}
+
 	return fmt.Sprintf(
-		" %s %s",
-		v.Prevote.Serialize(disableEmojis),
-		v.Precommit.Serialize(disableEmojis),
+		" %s %s %s %s%% %s ",
+		prevoteStr,
+		precommitStr,
+		utils.RightPadAndTrim(strconv.Itoa(v.Index+1), 3),
+		utils.RightPadAndTrim(votingPowerStr, 6),
+		utils.LeftPadAndTrim(name, 25),
 	)
 }
 
-type RoundVotes []RoundVote
+type TMValidators []TMValidator
 
-type ValidatorWithRoundVote struct {
-	Validator Validator
-	RoundVote RoundVote
-}
-
-type ValidatorsWithRoundVote []ValidatorWithRoundVote
-
-type ValidatorsWithAllRoundsVotes struct {
-	Validators  []Validator
-	RoundsVotes []RoundVotes
-}
-
-func (v Validators) GetTotalVotingPower() *big.Int {
+// GetTotalVotingPower returns the sum of all validators' voting power
+func (v TMValidators) GetTotalVotingPower() *big.Int {
 	sum := big.NewInt(0)
-
 	for _, validator := range v {
-		sum = sum.Add(sum, validator.VotingPower)
+		sum = sum.Add(sum, big.NewInt(validator.VotingPower))
 	}
-
-	return sum
-}
-func (v ValidatorsWithRoundVote) GetTotalVotingPower() *big.Int {
-	sum := big.NewInt(0)
-
-	for _, validator := range v {
-		sum = sum.Add(sum, validator.Validator.VotingPower)
-	}
-
 	return sum
 }
 
-func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
+// GetTotalVotingPowerPrevotedPercent calculates percentage of voting power that prevoted
+func (v TMValidators) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
 	prevoted := big.NewInt(0)
 	totalVP := big.NewInt(0)
 
 	for _, validator := range v {
-		totalVP = totalVP.Add(totalVP, validator.Validator.VotingPower)
-		if validator.RoundVote.Prevote == VotedForBlock || (countDisagreeing && validator.RoundVote.Prevote == NoVote) {
-			prevoted = prevoted.Add(prevoted, validator.Validator.VotingPower)
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		if validator.CurrentRoundVote != nil {
+			if validator.CurrentRoundVote.Prevote == VoteStateForBlock || 
+			   (countDisagreeing && validator.CurrentRoundVote.Prevote == VoteStateNone) {
+				prevoted = prevoted.Add(prevoted, big.NewInt(validator.VotingPower))
+			}
 		}
 	}
 
@@ -105,14 +124,18 @@ func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrevotedPercent(countDisagre
 	return votingPowerPercent
 }
 
-func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
+// GetTotalVotingPowerPrecommittedPercent calculates percentage of voting power that precommitted
+func (v TMValidators) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
 	precommitted := big.NewInt(0)
 	totalVP := big.NewInt(0)
 
 	for _, validator := range v {
-		totalVP = totalVP.Add(totalVP, validator.Validator.VotingPower)
-		if validator.RoundVote.Precommit == VotedForBlock || (countDisagreeing && validator.RoundVote.Precommit == NoVote) {
-			precommitted = precommitted.Add(precommitted, validator.Validator.VotingPower)
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		if validator.CurrentRoundVote != nil {
+			if validator.CurrentRoundVote.Precommit == VoteStateForBlock || 
+			   (countDisagreeing && validator.CurrentRoundVote.Precommit == VoteStateNone) {
+				precommitted = precommitted.Add(precommitted, big.NewInt(validator.VotingPower))
+			}
 		}
 	}
 
@@ -123,132 +146,21 @@ func (v ValidatorsWithRoundVote) GetTotalVotingPowerPrecommittedPercent(countDis
 	return votingPowerPercent
 }
 
-type ValidatorWithInfo struct {
-	Validator      Validator
-	RoundVote      RoundVote
-	ChainValidator *ChainValidator
+
+// RoundVoteState represents validator vote state for a specific round using new VoteState
+type RoundVoteState struct {
+	Address    string
+	Prevote    VoteState
+	Precommit  VoteState
+	IsProposer bool
 }
 
-func (v ValidatorWithInfo) Serialize(disableEmojis bool) string {
-	name := v.Validator.Address
-	if v.ChainValidator != nil {
-		name = v.ChainValidator.Moniker
-		if v.ChainValidator.AssignedAddress != "" {
-			emoji := "🔑"
-			if disableEmojis {
-				emoji = "[k[]"
-			}
-			name = emoji + " " + name
-		}
-	}
-
+func (v RoundVoteState) Serialize(disableEmojis bool) string {
 	return fmt.Sprintf(
-		" %s %s %s %s%% %s ",
-		v.RoundVote.Prevote.Serialize(disableEmojis),
-		v.RoundVote.Precommit.Serialize(disableEmojis),
-		utils.RightPadAndTrim(strconv.Itoa(v.Validator.Index+1), 3),
-		utils.RightPadAndTrim(fmt.Sprintf("%.2f", v.Validator.VotingPowerPercent), 6),
-		utils.LeftPadAndTrim(name, 25),
+		" %s %s",
+		v.Prevote.Serialize(disableEmojis),
+		v.Precommit.Serialize(disableEmojis),
 	)
 }
 
-type ValidatorsWithInfo []ValidatorWithInfo
 
-type ValidatorWithChainValidator struct {
-	Validator      Validator
-	ChainValidator *ChainValidator
-}
-
-func (v ValidatorWithChainValidator) Equals(other ValidatorWithChainValidator) bool {
-	if v.Validator.Index != other.Validator.Index {
-		return false
-	}
-
-	if v.Validator.Address != other.Validator.Address {
-		return false
-	}
-
-	if v.Validator.VotingPowerPercent.Cmp(other.Validator.VotingPowerPercent) != 0 {
-		return false
-	}
-
-	if v.Validator.VotingPower.Cmp(other.Validator.VotingPower) != 0 {
-		return false
-	}
-
-	if (v.ChainValidator == nil) != (other.ChainValidator == nil) {
-		return false
-	}
-
-	if v.ChainValidator == nil && other.ChainValidator == nil {
-		return true
-	}
-
-	if v.ChainValidator.Moniker != other.ChainValidator.Moniker {
-		return false
-	}
-
-	if v.ChainValidator.Address != other.ChainValidator.Address {
-		return false
-	}
-
-	if v.ChainValidator.AssignedAddress != other.ChainValidator.AssignedAddress {
-		return false
-	}
-
-	return true
-}
-
-func (v ValidatorWithChainValidator) Serialize() string {
-	name := v.Validator.Address
-	if v.ChainValidator != nil {
-		name = v.ChainValidator.Moniker
-		if v.ChainValidator.AssignedAddress != "" {
-			name = "🔑 " + name
-		}
-	}
-
-	return fmt.Sprintf(
-		" %s %s%% %s ",
-		utils.RightPadAndTrim(strconv.Itoa(v.Validator.Index+1), 3),
-		utils.RightPadAndTrim(fmt.Sprintf("%.2f", v.Validator.VotingPowerPercent), 6),
-		utils.LeftPadAndTrim(name, 25),
-	)
-}
-
-type ValidatorsWithInfoAndAllRoundVotes struct {
-	Validators  []ValidatorWithChainValidator
-	RoundsVotes []RoundVotes
-}
-
-func (v ValidatorsWithInfoAndAllRoundVotes) Equals(other ValidatorsWithInfoAndAllRoundVotes) bool {
-	if len(v.RoundsVotes) != len(other.RoundsVotes) {
-		return false
-	}
-
-	for index, roundsVotes := range v.RoundsVotes {
-		otherRoundsVotes := other.RoundsVotes[index]
-		if len(roundsVotes) != len(otherRoundsVotes) {
-			return false
-		}
-
-		for innerIndex, roundVotes := range roundsVotes {
-			otherRoundVotes := otherRoundsVotes[innerIndex]
-			if roundVotes.Equals(otherRoundVotes) {
-				return false
-			}
-		}
-	}
-
-	if len(v.Validators) != len(other.Validators) {
-		return false
-	}
-
-	for index, validator := range v.Validators {
-		if !validator.Equals(other.Validators[index]) {
-			return false
-		}
-	}
-
-	return true
-}

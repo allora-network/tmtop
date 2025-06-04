@@ -15,7 +15,7 @@ type AllRoundsTableData struct {
 	tview.TableContentReadOnly
 
 	RoundData     *types.RoundDataMap
-	Validators    types.ValidatorsWithInfoAndAllRoundVotes
+	TMValidators  types.TMValidators
 	DisableEmojis bool
 	Transpose     bool
 	CurrentHeight int64
@@ -69,13 +69,14 @@ func (d *AllRoundsTableData) GetColumnCount() int {
 	return len(d.cells[0])
 }
 
-func (d *AllRoundsTableData) SetValidators(validators types.ValidatorsWithInfoAndAllRoundVotes, height int64) {
+// SetTMValidators sets the unified validator collection (preferred)
+func (d *AllRoundsTableData) SetTMValidators(validators types.TMValidators, height int64) {
 	d.mutex.Lock()
 
 	if d.CurrentHeight == 0 && height > 0 {
 		d.CurrentHeight = height
 	}
-	d.Validators = validators
+	d.TMValidators = validators
 
 	d.mutex.Unlock()
 }
@@ -104,7 +105,8 @@ func (d *AllRoundsTableData) Update() {
 func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	cells := [][]*tview.TableCell{}
 
-	if d.Validators.Validators == nil || len(d.Validators.RoundsVotes) == 0 {
+	// Check if we have validators to display
+	if len(d.TMValidators) == 0 {
 		return cells
 	}
 
@@ -113,6 +115,9 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 		tview.NewTableCell("Validator").
 			SetSelectable(false).
 			SetStyle(tcell.StyleDefault.Bold(true)),
+
+		tview.NewTableCell("").
+			SetSelectable(false),
 	}
 
 	for hr := range d.RoundData.ReverseIter() {
@@ -129,38 +134,24 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	}
 	cells = append(cells, headerRow)
 
-	// Create validator rows here
-	for i, validator := range d.Validators.Validators {
+	// Create validator rows using TMValidators
+	for i, validator := range d.TMValidators {
 		row := []*tview.TableCell{}
 
 		// enumerated validator name
-		name := getValidatorName(validator, i)
-		validatorCell := tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name))
-		row = append(row, validatorCell)
+		name := validator.GetDisplayName()
+		row = append(row, tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name)))
+		row = append(row, tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent)))
 
 		for _, roundData := range d.RoundData.ReverseIter() {
-			valVotes := roundData.Votes[validator.Validator.Address]
+			valVotes := roundData.Votes[validator.GetDisplayAddress()]
 
-			var prevote types.VoteType
-			if blockID, ok := valVotes[cmtproto.PrevoteType]; !ok {
-				prevote = types.NoVote
-			} else if blockID.IsZero() {
-				prevote = types.VotedNil
-			} else {
-				prevote = types.VotedForBlock
-			}
-
-			var precommit types.VoteType
-			if blockID, ok := valVotes[cmtproto.PrecommitType]; !ok {
-				precommit = types.NoVote
-			} else if blockID.IsZero() {
-				precommit = types.VotedNil
-			} else {
-				precommit = types.VotedForBlock
-			}
+			// Use new VoteState functions with CometBFT types
+			prevote := types.VoteStateFromVotesMap(valVotes, cmtproto.PrevoteType)
+			precommit := types.VoteStateFromVotesMap(valVotes, cmtproto.PrecommitType)
 
 			cell := tview.NewTableCell(" " + precommit.Serialize(d.DisableEmojis) + prevote.Serialize(d.DisableEmojis) + " ")
-			if roundData.Proposers.Has(validator.Validator.Address) {
+			if roundData.Proposers.Has(validator.GetDisplayAddress()) {
 				cell.SetBackgroundColor(tcell.ColorForestGreen)
 			}
 			row = append(row, cell)
@@ -170,29 +161,6 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	}
 
 	return cells
-}
-
-// Helper function to get validator name
-func getValidatorName(validator types.ValidatorWithChainValidator, index int) string {
-	name := fmt.Sprintf("Validator %d", index)
-
-	if validator.ChainValidator == nil {
-		return name
-	}
-
-	if validator.ChainValidator.Moniker != "" {
-		return validator.ChainValidator.Moniker
-	}
-
-	if validator.ChainValidator.Address != "" {
-		addr := validator.ChainValidator.Address
-		if len(addr) > 10 {
-			addr = addr[:6] + "..." + addr[len(addr)-4:]
-		}
-		return addr
-	}
-
-	return name
 }
 
 func (d *AllRoundsTableData) HandleKey(event *tcell.EventKey) bool {

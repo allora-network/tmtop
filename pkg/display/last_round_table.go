@@ -12,7 +12,7 @@ import (
 type LastRoundTableData struct {
 	tview.TableContentReadOnly
 
-	Validators     types.ValidatorsWithInfo
+	TMValidators   types.TMValidators
 	ConsensusError error
 	ColumnsCount   int
 	DisableEmojis  bool
@@ -25,7 +25,7 @@ type LastRoundTableData struct {
 func NewLastRoundTableData(columnsCount int, disableEmojis bool, transpose bool) *LastRoundTableData {
 	return &LastRoundTableData{
 		ColumnsCount:  columnsCount,
-		Validators:    make(types.ValidatorsWithInfo, 0),
+		TMValidators:  make(types.TMValidators, 0),
 		DisableEmojis: disableEmojis,
 		Transpose:     transpose,
 
@@ -83,9 +83,10 @@ func (d *LastRoundTableData) GetColumnCount() int {
 	return len(d.cells[0])
 }
 
-func (d *LastRoundTableData) SetValidators(validators types.ValidatorsWithInfo, consensusError error) {
+// SetTMValidators sets the unified validator collection (preferred)
+func (d *LastRoundTableData) SetTMValidators(validators types.TMValidators, consensusError error) {
 	d.mutex.Lock()
-	d.Validators = validators
+	d.TMValidators = validators
 	d.ConsensusError = consensusError
 	d.mutex.Unlock()
 
@@ -105,11 +106,16 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 		return [][]*tview.TableCell{
 			{tview.NewTableCell(fmt.Sprintf(" Error fetching consensus: %s", d.ConsensusError))},
 		}
+	} else if d.ColumnsCount == 0 {
+		return [][]*tview.TableCell{}
 	}
 
-	rowsCount := len(d.Validators)/d.ColumnsCount + 1
-	if len(d.Validators)%d.ColumnsCount == 0 {
-		rowsCount = len(d.Validators) / d.ColumnsCount
+	// Use TMValidators
+	validatorCount := len(d.TMValidators)
+
+	rowsCount := validatorCount/d.ColumnsCount + 1
+	if validatorCount%d.ColumnsCount == 0 {
+		rowsCount = validatorCount / d.ColumnsCount
 	}
 
 	cells := make([][]*tview.TableCell, rowsCount)
@@ -126,14 +132,18 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 			}
 
 			text := ""
+			isProposer := false
 
-			if index < len(d.Validators) {
-				text = d.Validators[index].Serialize(d.DisableEmojis)
+			// Use TMValidators
+			if index < len(d.TMValidators) {
+				text = d.TMValidators[index].Serialize(d.DisableEmojis)
+				isProposer = d.TMValidators[index].CurrentRoundVote != nil &&
+					d.TMValidators[index].CurrentRoundVote.IsProposer
 			}
 
 			cell := tview.NewTableCell(text)
 
-			if index < len(d.Validators) && d.Validators[index].RoundVote.IsProposer {
+			if isProposer {
 				cell.SetBackgroundColor(tcell.ColorForestGreen)
 			}
 
