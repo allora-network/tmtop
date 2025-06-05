@@ -57,4 +57,3 @@ func (v VoteState) Serialize(disableEmojis bool) string {
 		return ""
 	}
 }
-

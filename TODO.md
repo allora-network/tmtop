@@ -2,21 +2,6 @@
 
 ## Immediate Tasks
 
-### • Expand RoundDataMap usage to other views
-- **Current State**: RoundDataMap only used in `all_rounds_table.go`
-- **Opportunity**: Extend to `last_round_table.go` and consensus display
-- **Implementation**: Replace manual vote tracking with RoundDataMap queries
-- **Benefits**: Consistent data source, simplified view logic
-
-### • Implement SQLite storage for historical data
-- **Current Issue**: All data stored in memory, limited history
-- **Proposed Solution**: SQLite backend for persistence and larger datasets
-- **Schema Design**: 
-  - Tables for validators, votes, rounds, consensus events
-  - Indexed by height/round for efficient queries
-- **Benefits**: Crash resilience, historical analysis capabilities, reduced memory usage
-- **Migration Strategy**: Implement alongside current in-memory storage, gradual transition
-
 
 ## Architectural Improvements
 
@@ -42,12 +27,6 @@
   }
   ```
 - **Benefits**: Clearer data model, reduced memory usage, easier reasoning
-
-### • Remove redundant type conversion layers
-- **Current Issue**: Extensive conversion between custom and CometBFT types (`pkg/types/converter.go:13-145`)
-- **Opportunity**: Use CometBFT types directly, leverage native JSON marshaling
-- **Implementation**: Replace conversion functions with direct CometBFT type usage
-- **Benefits**: Less code to maintain, better type safety, performance improvement
 
 ### • Decouple display logic from State structure
 - **Current Issue**: Display layer tightly coupled to specific State structure (`pkg/display/wrapper.go:272-298`)
@@ -168,4 +147,76 @@
   - Enhanced `HandlePanic()` to perform cleanup before re-panicking
   - Implemented `restoreTerminal()` with proper tcell cleanup and ANSI reset sequences
   - Modified display wrapper to handle cleanup on drawing errors
-- **Benefits**: No more corrupted terminal sessions after crashes or forced exits
+- **Bug Fix**: Removed signal interception that was blocking Ctrl+C, now uses tview's native input handling
+- **Benefits**: No more corrupted terminal sessions after crashes or forced exits, Ctrl+C works properly
+
+### ✅ Fix empty table display bug
+- **Completed**: Implemented missing TMValidator data conversion pipeline
+- **Root Issue**: Tables showed no data because validator conversion was never implemented after refactoring
+- **Changes Made**:
+  - Implemented `convertToTMValidators()` method in `pkg/app.go` to convert fetched JSON data to display format
+  - Added `convertToCometBFTValidator()` for proper CometBFT validator creation with ed25519 key support
+  - Created utility functions `HexToBytes()` and `Base64ToBytes()` in `pkg/utils/utils.go`
+  - Fixed the RefreshConsensus() TODO that was blocking data flow to display layer
+  - Added comprehensive error handling and logging for conversion failures
+- **Benefits**: Tables now properly display validator data including names, addresses, and voting status
+
+### ✅ Fix voting power percentage display
+- **Completed**: Implemented precise voting power percentage calculation and display
+- **Root Issue**: Stake percentages showed as `<nil>` because `VotingPowerPercent` field was never calculated
+- **Changes Made**:
+  - Enhanced `convertToTMValidators()` to calculate total voting power and individual validator percentages
+  - Used `math/big.Float` for precise percentage calculations (handles fractional percentages accurately)
+  - Fixed `TMValidator.Serialize()` method to properly format `*big.Float` using `.Text('f', 2)` instead of `fmt.Sprintf`
+  - Added nil-checking and fallback to "0.00" for safety
+  - Integrated voting power calculation with CometBFT validator creation
+- **Benefits**: Stake percentages now display correctly (e.g., "15.23%") instead of `<nil>`, accurate to 2 decimal places
+
+### ✅ Expand RoundDataMap usage to other views
+- **Completed**: Extended RoundDataMap usage from `all_rounds_table.go` to `last_round_table.go` and consensus display
+- **Changes Made**:
+  - Updated `LastRoundTableData` to include `RoundData`, `CurrentHeight`, and `CurrentRound` fields
+  - Added new methods: `SetRoundData()` and `SetCurrentRound()` for round data management
+  - Created `generateValidatorDisplayText()` method that queries RoundDataMap directly instead of using manually populated `CurrentRoundVote` field
+  - Updated `State` methods to use RoundDataMap queries instead of TMValidator methods for consensus display
+  - Modified display wrapper to call new LastRoundTable methods with RoundDataMap and current round information
+- **Technical Benefits**:
+  - Consistent data source: Both LastRoundTable and AllRoundsTable now use the same RoundDataMap source
+  - Simplified logic: Removed dependency on manually populated `CurrentRoundVote` field
+  - Better maintainability: Centralized vote state management in RoundDataMap
+  - Reduced memory usage: No need to duplicate vote state in TMValidator objects
+- **Architecture Improvement**: Cleaner separation of concerns with RoundDataMap as central store for all vote data
+
+### ✅ Implement SQLite storage for historical data
+- **Completed**: Comprehensive SQLite backend with sqlc code generation for persistent consensus data storage
+- **Database Schema**:
+  - **Core Tables**: `validators`, `heights`, `rounds`, `votes`, `consensus_events`, `validator_snapshots`
+  - **Efficient Indexing**: Optimized for height/round lookups, validator searches, and time-based queries
+  - **Foreign Key Relationships**: Proper data integrity between validators, heights, rounds, and votes
+- **sqlc Code Generation**:
+  - **Schema**: `/pkg/db/migrations/001_initial.sql` with comprehensive table structure
+  - **Queries**: Organized SQL queries in `/pkg/db/queries/` by entity type (validators, heights, rounds, votes, etc.)
+  - **Generated Code**: Type-safe Go code in `/pkg/db/sqlc/` with prepared statements and interfaces
+- **Service Layer Architecture**:
+  - **DB Service** (`/pkg/db/db.go`): Connection management, migrations, WAL mode, cleanup routines
+  - **ConsensusStore** (`/pkg/db/consensus_store.go`): High-level consensus data persistence with transaction support
+  - **Integration**: Seamless integration with existing RoundDataMap and TMValidator types
+- **Configuration & CLI**:
+  - **New Flags**: `--database-path`, `--max-retain-blocks`, `--max-retain-days`
+  - **Config File**: Full support in `config.toml.example` with comprehensive documentation
+  - **Environment Variables**: `TMTOP_DATABASE_PATH`, `TMTOP_MAX_RETAIN_BLOCKS`, `TMTOP_MAX_RETAIN_DAYS`
+  - **Smart Defaults**: `~/.config/tmtop/tmtop.db` if not specified
+- **Real-time Persistence**:
+  - **Automatic Storage**: Real-time persistence of consensus states, validator data, and vote information
+  - **Event Tracking**: CometBFT events (new rounds, votes) stored with full context
+  - **Background Cleanup**: Hourly cleanup routine to manage database size based on retention policies
+  - **Graceful Degradation**: Application continues working if database fails to initialize
+- **Data Retention Management**:
+  - **Block-based Retention**: Keep last N blocks (default: 10,000)
+  - **Time-based Retention**: Alternative day-based retention (default: 7 days)
+  - **Automatic Cleanup**: Hourly background process removes old data while respecting foreign key constraints
+- **Technical Features**:
+  - **Performance**: WAL mode, prepared statements, efficient indexing, batch operations
+  - **Data Integrity**: Foreign key constraints, transaction-based operations, comprehensive error handling
+  - **Monitoring**: Structured logging for all database operations, cleanup status tracking
+- **Benefits**: Crash resilience, historical analysis capabilities, reduced memory usage, foundation for advanced analytics

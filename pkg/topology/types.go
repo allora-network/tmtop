@@ -8,8 +8,8 @@ import (
 )
 
 type Graph struct {
-	Nodes      []types.RPC                `json:"nodes"`
-	Conns      []Conn                     `json:"conns"`
+	Nodes      []types.RPC                  `json:"nodes"`
+	Conns      []Conn                       `json:"conns"`
 	Validators map[string]types.TMValidator `json:"validators"`
 
 	connsMap map[string]bool

@@ -275,8 +275,10 @@ func (w *Wrapper) SetState(state *types.State) {
 	w.App.QueueUpdateDraw(func() {
 		w.State = state
 
-		// Use TMValidators
+		// Use TMValidators and RoundDataMap
 		w.LastRoundTableData.SetTMValidators(state.GetTMValidators(), state.ConsensusStateError)
+		w.LastRoundTableData.SetRoundData(state.VotesByRound)
+		w.LastRoundTableData.SetCurrentRound(state.Height, int32(state.Round))
 		if w.AllRoundsTableData != nil {
 			w.AllRoundsTableData.SetTMValidators(state.GetTMValidators(), state.Height)
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)

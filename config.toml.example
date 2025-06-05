@@ -1,0 +1,149 @@
+# tmtop Configuration File
+# 
+# This is an example configuration file for tmtop, a terminal-based monitoring tool
+# for Tendermint/CometBFT consensus visualization.
+#
+# Place this file at ~/.config/tmtop/config.toml to use it by default,
+# or specify a custom location with --config-file flag.
+#
+# All settings in this file can be overridden by command-line flags.
+# Environment variables are also supported with TMTOP_ prefix (e.g., TMTOP_RPC_HOST).
+
+# ==============================================================================
+# RPC Configuration
+# ==============================================================================
+
+# Primary RPC endpoint for the chain you want to monitor
+# Can also be specified as the first positional argument
+rpc-host = "http://localhost:26657"
+
+# For consumer chains: Provider chain RPC endpoint
+# Leave empty for non-consumer chains
+provider-rpc-host = ""
+
+# Consumer chain ID (required only if provider-rpc-host is set)
+# This is NOT the chain ID, but the consumer ID used by the provider
+consumer-id = ""
+
+# LCD/REST API endpoint (required only for chain-type = "cosmos-lcd")
+lcd-host = ""
+
+# ==============================================================================
+# Chain Configuration  
+# ==============================================================================
+
+# Type of chain to monitor
+# Options: "cosmos-rpc", "cosmos-lcd", "tendermint"
+chain-type = "cosmos-rpc"
+
+# Custom halt height (0 = disabled)
+# Useful for monitoring planned upgrades
+halt-height = 0
+
+# How many blocks to look back when calculating average block time
+blocks-behind = 1000
+
+# ==============================================================================
+# Refresh Rates
+# ==============================================================================
+
+# Main consensus state refresh rate
+# How often to fetch the current consensus status
+refresh-rate = "1s"
+
+# Validator set refresh rate
+# How often to fetch the validator set (slower changing data)
+validators-refresh-rate = "1m"
+
+# Chain information refresh rate  
+# How often to fetch chain metadata (version, network name, etc.)
+chain-info-refresh-rate = "5m"
+
+# Upgrade plan refresh rate
+# How often to check for scheduled chain upgrades
+upgrade-refresh-rate = "30m"
+
+# Block time calculation refresh rate
+# How often to recalculate average block time
+block-time-refresh-rate = "30s"
+
+# ==============================================================================
+# Display Options
+# ==============================================================================
+
+# Enable verbose logging for debugging
+verbose = false
+
+# Disable emoji output (useful for terminals that don't support emojis)
+disable-emojis = false
+
+# Timezone for displaying timestamps
+# Examples: "UTC", "America/New_York", "Europe/London", "Asia/Tokyo"
+# Leave empty to use system timezone
+timezone = ""
+
+# ==============================================================================
+# Debugging & Development
+# ==============================================================================
+
+# Path to write debug logs to file
+# Leave empty to disable file logging
+debug-file = ""
+
+# ==============================================================================
+# Topology API (Optional)
+# ==============================================================================
+
+# Enable the topology API server
+# Provides a web interface for visualizing network topology
+with-topology-api = false
+
+# Address to serve the topology API on
+# Only used if with-topology-api = true
+topology-listen-addr = "0.0.0.0:8080"
+
+# ==============================================================================
+# Database Configuration
+# ==============================================================================
+
+# Path to SQLite database file for persistent storage
+# Leave empty to use default: ~/.config/tmtop/tmtop.db
+# database-path = ""
+
+# Maximum number of blocks to retain in database
+# Older blocks will be automatically cleaned up
+max-retain-blocks = 10000
+
+# Alternative: Maximum number of days to retain data
+# Used as alternative to max-retain-blocks
+max-retain-days = 7
+
+# ==============================================================================
+# Example Configurations
+# ==============================================================================
+
+# Example 1: Monitoring Cosmos Hub mainnet
+# rpc-host = "https://cosmos-rpc.publicnode.com:443"
+# chain-type = "cosmos-rpc"
+# timezone = "UTC"
+
+# Example 2: Monitoring a local testnet with topology API
+# rpc-host = "http://localhost:26657"
+# chain-type = "cosmos-rpc"
+# with-topology-api = true
+# topology-listen-addr = "127.0.0.1:8080"
+# verbose = true
+
+# Example 3: Consumer chain monitoring
+# rpc-host = "http://consumer-chain:26657"
+# provider-rpc-host = "http://provider-chain:26657"
+# consumer-id = "consumer-1"
+# chain-type = "cosmos-rpc"
+
+# Example 4: High-frequency monitoring setup
+# rpc-host = "http://localhost:26657"
+# refresh-rate = "500ms"
+# validators-refresh-rate = "30s"
+# chain-info-refresh-rate = "2m"
+# verbose = true
+# debug-file = "/tmp/tmtop-debug.log"
