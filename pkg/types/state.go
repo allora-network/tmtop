@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"maps"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -259,13 +260,13 @@ func (s *State) SerializeConsensus(timezone *time.Location) string {
 
 	sb.WriteString(fmt.Sprintf(
 		" prevote consensus (total/agreeing): %.2f / %.2f\n",
-		s.TMValidators.GetTotalVotingPowerPrevotedPercent(true),
-		s.TMValidators.GetTotalVotingPowerPrevotedPercent(false),
+		s.GetTotalVotingPowerPrevotedPercent(true),
+		s.GetTotalVotingPowerPrevotedPercent(false),
 	))
 	sb.WriteString(fmt.Sprintf(
 		" precommit consensus (total/agreeing): %.2f / %.2f\n",
-		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true),
-		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(false),
+		s.GetTotalVotingPowerPrecommittedPercent(true),
+		s.GetTotalVotingPowerPrecommittedPercent(false),
 	))
 
 	sb.WriteString(fmt.Sprintf(" last updated at: %s\n", utils.SerializeTime(time.Now().In(timezone))))
@@ -378,7 +379,7 @@ func (s *State) SerializePrevotesProgressbar(width int, height int) string {
 		return ""
 	}
 
-	prevotePercent := s.TMValidators.GetTotalVotingPowerPrevotedPercent(true)
+	prevotePercent := s.GetTotalVotingPowerPrevotedPercent(true)
 	prevotePercentFloat, _ := prevotePercent.Float64()
 	prevotePercentInt := int(prevotePercentFloat)
 
@@ -390,7 +391,7 @@ func (s *State) SerializePrecommitsProgressbar(width int, height int) string {
 		return ""
 	}
 
-	precommitPercent := s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true)
+	precommitPercent := s.GetTotalVotingPowerPrecommittedPercent(true)
 	precommitPercentFloat, _ := precommitPercent.Float64()
 	precommitPercentInt := int(precommitPercentFloat)
 
@@ -578,4 +579,64 @@ func (v *RoundDataMap) upsertRoundData(height int64, round int32) *RoundData {
 	}
 
 	return roundData
+}
+
+// GetTotalVotingPowerPrevotedPercent calculates percentage using RoundDataMap
+func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
+	if len(s.TMValidators) == 0 {
+		return big.NewFloat(0)
+	}
+
+	prevoted := big.NewInt(0)
+	totalVP := big.NewInt(0)
+
+	for _, validator := range s.TMValidators {
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+
+		// Query RoundDataMap for current vote state
+		prevoteState := s.VotesByRound.GetVote(s.Height, int32(s.Round), validator.GetDisplayAddress(), cptypes.PrevoteType)
+		if prevoteState == VoteStateForBlock || (countDisagreeing && prevoteState == VoteStateNil) {
+			prevoted = prevoted.Add(prevoted, big.NewInt(validator.VotingPower))
+		}
+	}
+
+	if totalVP.Cmp(big.NewInt(0)) == 0 {
+		return big.NewFloat(0)
+	}
+
+	votingPowerPercent := big.NewFloat(0).SetInt(prevoted)
+	votingPowerPercent = votingPowerPercent.Quo(votingPowerPercent, big.NewFloat(0).SetInt(totalVP))
+	votingPowerPercent = votingPowerPercent.Mul(votingPowerPercent, big.NewFloat(100))
+
+	return votingPowerPercent
+}
+
+// GetTotalVotingPowerPrecommittedPercent calculates percentage using RoundDataMap
+func (s *State) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
+	if len(s.TMValidators) == 0 {
+		return big.NewFloat(0)
+	}
+
+	precommitted := big.NewInt(0)
+	totalVP := big.NewInt(0)
+
+	for _, validator := range s.TMValidators {
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+
+		// Query RoundDataMap for current vote state
+		precommitState := s.VotesByRound.GetVote(s.Height, int32(s.Round), validator.GetDisplayAddress(), cptypes.PrecommitType)
+		if precommitState == VoteStateForBlock || (countDisagreeing && precommitState == VoteStateNil) {
+			precommitted = precommitted.Add(precommitted, big.NewInt(validator.VotingPower))
+		}
+	}
+
+	if totalVP.Cmp(big.NewInt(0)) == 0 {
+		return big.NewFloat(0)
+	}
+
+	votingPowerPercent := big.NewFloat(0).SetInt(precommitted)
+	votingPowerPercent = votingPowerPercent.Quo(votingPowerPercent, big.NewFloat(0).SetInt(totalVP))
+	votingPowerPercent = votingPowerPercent.Mul(votingPowerPercent, big.NewFloat(100))
+
+	return votingPowerPercent
 }

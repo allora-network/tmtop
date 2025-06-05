@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"main/pkg/types"
 	"main/pkg/utils"
+	"strconv"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -13,6 +15,9 @@ type LastRoundTableData struct {
 	tview.TableContentReadOnly
 
 	TMValidators   types.TMValidators
+	RoundData      *types.RoundDataMap
+	CurrentHeight  int64
+	CurrentRound   int32
 	ConsensusError error
 	ColumnsCount   int
 	DisableEmojis  bool
@@ -26,6 +31,9 @@ func NewLastRoundTableData(columnsCount int, disableEmojis bool, transpose bool)
 	return &LastRoundTableData{
 		ColumnsCount:  columnsCount,
 		TMValidators:  make(types.TMValidators, 0),
+		RoundData:     types.NewRoundDataMap(),
+		CurrentHeight: 0,
+		CurrentRound:  0,
 		DisableEmojis: disableEmojis,
 		Transpose:     transpose,
 
@@ -93,6 +101,25 @@ func (d *LastRoundTableData) SetTMValidators(validators types.TMValidators, cons
 	d.redrawData()
 }
 
+// SetRoundData sets the round data map for vote tracking
+func (d *LastRoundTableData) SetRoundData(roundData *types.RoundDataMap) {
+	d.mutex.Lock()
+	d.RoundData = roundData
+	d.mutex.Unlock()
+
+	d.redrawData()
+}
+
+// SetCurrentRound sets the current height and round for display
+func (d *LastRoundTableData) SetCurrentRound(height int64, round int32) {
+	d.mutex.Lock()
+	d.CurrentHeight = height
+	d.CurrentRound = round
+	d.mutex.Unlock()
+
+	d.redrawData()
+}
+
 func (d *LastRoundTableData) redrawData() {
 	cells := d.makeCells()
 
@@ -134,11 +161,18 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 			text := ""
 			isProposer := false
 
-			// Use TMValidators
+			// Use TMValidators with RoundDataMap for vote state
 			if index < len(d.TMValidators) {
-				text = d.TMValidators[index].Serialize(d.DisableEmojis)
-				isProposer = d.TMValidators[index].CurrentRoundVote != nil &&
-					d.TMValidators[index].CurrentRoundVote.IsProposer
+				validator := d.TMValidators[index]
+
+				// Check if validator is proposer for current round
+				if d.RoundData != nil {
+					proposers := d.RoundData.GetProposers(d.CurrentHeight, d.CurrentRound)
+					isProposer = proposers != nil && proposers.Has(validator.GetDisplayAddress())
+				}
+
+				// Generate display text using RoundDataMap vote data
+				text = d.generateValidatorDisplayText(validator)
 			}
 
 			cell := tview.NewTableCell(text)
@@ -151,4 +185,48 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 		}
 	}
 	return cells
+}
+
+// generateValidatorDisplayText creates validator display text using RoundDataMap data
+func (d *LastRoundTableData) generateValidatorDisplayText(validator types.TMValidator) string {
+	name := validator.GetDisplayName()
+	if validator.HasAssignedKey() {
+		emoji := "🔑"
+		if d.DisableEmojis {
+			emoji = "[k]"
+		}
+		name = emoji + " " + name
+	}
+
+	// Default vote states (no vote)
+	prevoteStr := "❌"
+	precommitStr := "❌"
+	if d.DisableEmojis {
+		prevoteStr = "[ ]"
+		precommitStr = "[ ]"
+	}
+
+	// Query RoundDataMap for current vote states
+	if d.RoundData != nil && d.CurrentHeight > 0 {
+		prevoteState := d.RoundData.GetVote(d.CurrentHeight, d.CurrentRound, validator.GetDisplayAddress(), cmtproto.PrevoteType)
+		precommitState := d.RoundData.GetVote(d.CurrentHeight, d.CurrentRound, validator.GetDisplayAddress(), cmtproto.PrecommitType)
+
+		prevoteStr = prevoteState.Serialize(d.DisableEmojis)
+		precommitStr = precommitState.Serialize(d.DisableEmojis)
+	}
+
+	// Format voting power percentage
+	votingPowerStr := "0.00"
+	if validator.VotingPowerPercent != nil {
+		votingPowerStr = validator.VotingPowerPercent.Text('f', 2)
+	}
+
+	return fmt.Sprintf(
+		" %s %s %s %s%% %s ",
+		prevoteStr,
+		precommitStr,
+		utils.RightPadAndTrim(strconv.Itoa(validator.Index+1), 3),
+		utils.RightPadAndTrim(votingPowerStr, 6),
+		utils.LeftPadAndTrim(name, 25),
+	)
 }

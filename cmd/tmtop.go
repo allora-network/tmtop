@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"main/pkg"
 	configPkg "main/pkg/config"
 	"main/pkg/logger"
@@ -40,6 +41,8 @@ func Execute(inputConfig configPkg.InputConfig, args []string, configFile string
 
 // loadConfigFile loads configuration from file using viper
 func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
+	fmt.Println("Loading config file:", configFile)
+
 	v := viper.New()
 
 	// Set config file path
@@ -52,12 +55,12 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 		if err != nil {
 			return err
 		}
-		
+
 		configDir := filepath.Join(homeDir, ".config", "tmtop")
 		v.SetConfigName("config")
 		v.SetConfigType("toml")
-		v.AddConfigPath(configDir)      // ~/.config/tmtop/
-		v.AddConfigPath(".")            // current directory
+		v.AddConfigPath(configDir) // ~/.config/tmtop/
+		v.AddConfigPath(".")       // current directory
 	}
 
 	// Set environment variable prefix for automatic env binding
@@ -83,6 +86,9 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	v.BindEnv("timezone", "TMTOP_TIMEZONE")
 	v.BindEnv("with-topology-api", "TMTOP_WITH_TOPOLOGY_API")
 	v.BindEnv("topology-listen-addr", "TMTOP_TOPOLOGY_LISTEN_ADDR")
+	v.BindEnv("database-path", "TMTOP_DATABASE_PATH")
+	v.BindEnv("max-retain-blocks", "TMTOP_MAX_RETAIN_BLOCKS")
+	v.BindEnv("max-retain-days", "TMTOP_MAX_RETAIN_DAYS")
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {
@@ -91,6 +97,7 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 			return err
 		}
 	}
+	fmt.Println("Loaded config file:", v.ConfigFileUsed())
 
 	// Map viper values to config struct (only if they exist and are not zero values)
 	if v.IsSet("rpc-host") {
@@ -147,6 +154,15 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	if v.IsSet("topology-listen-addr") {
 		config.TopologyListenAddr = v.GetString("topology-listen-addr")
 	}
+	if v.IsSet("database-path") {
+		config.DatabasePath = v.GetString("database-path")
+	}
+	if v.IsSet("max-retain-blocks") {
+		config.MaxRetainBlocks = v.GetInt64("max-retain-blocks")
+	}
+	if v.IsSet("max-retain-days") {
+		config.MaxRetainDays = v.GetInt("max-retain-days")
+	}
 
 	return nil
 }
@@ -186,6 +202,9 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&config.Timezone, "timezone", "", "Timezone to display dates in")
 	rootCmd.PersistentFlags().BoolVar(&config.WithTopologyAPI, "with-topology-api", false, "Enable topology API")
 	rootCmd.PersistentFlags().StringVar(&config.TopologyListenAddr, "topology-listen-addr", "0.0.0.0:8080", "The address on which to serve topology API")
+	rootCmd.PersistentFlags().StringVar(&config.DatabasePath, "database-path", "", "Path to SQLite database file (default: ~/.config/tmtop/tmtop.db)")
+	rootCmd.PersistentFlags().Int64Var(&config.MaxRetainBlocks, "max-retain-blocks", 10000, "Maximum number of blocks to retain in database")
+	rootCmd.PersistentFlags().IntVar(&config.MaxRetainDays, "max-retain-days", 7, "Maximum number of days to retain data (alternative to max-retain-blocks)")
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.GetDefaultLogger().Fatal().Err(err).Msg("Could not start application")

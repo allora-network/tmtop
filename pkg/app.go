@@ -1,9 +1,10 @@
 package pkg
 
 import (
+	"context"
 	"fmt"
-	"math/big"
 	configPkg "main/pkg/config"
+	"main/pkg/db"
 	"main/pkg/display"
 	"main/pkg/fetcher"
 	tmhttp "main/pkg/http"
@@ -11,6 +12,9 @@ import (
 	"main/pkg/topology"
 	"main/pkg/types"
 	"main/pkg/utils"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +36,9 @@ type App struct {
 	State          *types.State
 	LogChannel     chan string
 
-	// Direct fetcher instances instead of Aggregator
+	DB             *db.DB
+	ConsensusStore *db.ConsensusStore
+
 	TendermintClient  *fetcher.TendermintRPC
 	DataFetcher       fetcher.DataFetcher
 	CometRPCWebsocket *fetcher.CometRPCWebsocket
@@ -58,6 +64,41 @@ func NewApp(config *configPkg.Config, version string) *App {
 
 	state := types.NewState(config.RPCHost, logger)
 
+	// Initialize database if configured
+	var database *db.DB
+	var consensusStore *db.ConsensusStore
+
+	if config.DatabasePath != "" || config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
+		dbPath := config.DatabasePath
+		if dbPath == "" {
+			// Use default path: ~/.config/tmtop/tmtop.db
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				logger.Warn().Err(err).Msg("Could not get user home directory, using current directory for database")
+				dbPath = "tmtop.db"
+			} else {
+				dbPath = filepath.Join(homeDir, ".config", "tmtop", "tmtop.db")
+			}
+		}
+
+		fmt.Println("Using database path:", dbPath)
+
+		dbConfig := db.Config{
+			DatabasePath:    dbPath,
+			MaxRetainBlocks: config.MaxRetainBlocks,
+			MaxRetainDays:   config.MaxRetainDays,
+		}
+
+		var err error
+		database, err = db.New(dbConfig)
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to initialize database, continuing without persistence")
+		} else {
+			consensusStore = db.NewConsensusStore(database, logger)
+			logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
+		}
+	}
+
 	return &App{
 		Logger:            logger,
 		Version:           version,
@@ -65,6 +106,8 @@ func NewApp(config *configPkg.Config, version string) *App {
 		DisplayWrapper:    display.NewWrapper(config, state, logger, pauseChannel, version),
 		State:             state,
 		LogChannel:        logChannel,
+		DB:                database,
+		ConsensusStore:    consensusStore,
 		TendermintClient:  fetcher.NewTendermintRPC(config, state, logger),
 		DataFetcher:       fetcher.GetDataFetcher(config, state, logger),
 		CometRPCWebsocket: fetcher.NewCometRPCWebsocket(config.RPCHost, logger),
@@ -79,6 +122,15 @@ func NewApp(config *configPkg.Config, version string) *App {
 func (a *App) Start() {
 	// Set up terminal cleanup on exit
 	defer a.restoreTerminal()
+
+	// Set up database cleanup on exit
+	if a.DB != nil {
+		defer func() {
+			if err := a.DB.Close(); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to close database")
+			}
+		}()
+	}
 
 	if a.Config.WithTopologyAPI {
 		go a.ServeTopology()
@@ -96,6 +148,11 @@ func (a *App) Start() {
 	go a.SubscribeCometBFT()
 	go a.DisplayLogs()
 	go a.ListenForPause()
+
+	// Start database cleanup routine if database is enabled
+	if a.DB != nil && a.ConsensusStore != nil {
+		go a.DatabaseCleanupRoutine()
+	}
 
 	a.DisplayWrapper.Start()
 }
@@ -254,6 +311,40 @@ func (a *App) RefreshConsensus() {
 	tmValidators := a.convertToTMValidators(validators, consensus)
 	a.State.SetTMValidators(tmValidators)
 	a.State.SetConsensusStateError(nil)
+
+	// Persist to database if available
+	if a.ConsensusStore != nil && consensus != nil && consensus.Result != nil && consensus.Result.RoundState != nil {
+		ctx := context.Background()
+
+		// Parse height/round/step from consensus (format: "height/round/step")
+		heightRoundStep := consensus.Result.RoundState.HeightRoundStep
+		parts := strings.Split(heightRoundStep, "/")
+		if len(parts) >= 3 {
+			if height, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				if round, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					if step, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+						// Update state height/round from consensus
+						a.State.Height = height
+						a.State.Round = round
+						a.State.Step = step
+
+						// Store validators and height information
+						if err := a.ConsensusStore.StoreValidators(ctx, height, tmValidators); err != nil {
+							a.Logger.Error().Err(err).Int64("height", height).Msg("Failed to persist validators to database")
+						}
+
+						// Store round data from current state
+						for hr, roundData := range a.State.VotesByRound.Iter() {
+							if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, tmValidators); err != nil {
+								a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	a.DisplayWrapper.SetState(a.State)
 }
 
@@ -454,6 +545,15 @@ func (a *App) SubscribeCometBFT() {
 		case <-mbEvents.Notify():
 			events := mbEvents.RetrieveAll()
 			a.State.AddCometBFTEvents(events)
+
+			// Persist events to database if available
+			if a.ConsensusStore != nil && len(events) > 0 {
+				ctx := context.Background()
+				if err := a.ConsensusStore.StoreCometBFTEvents(ctx, events, a.State.GetTMValidators()); err != nil {
+					a.Logger.Error().Err(err).Msg("Failed to persist CometBFT events to database")
+				}
+			}
+
 			a.DisplayWrapper.SetState(a.State)
 		}
 	}
@@ -528,7 +628,7 @@ func (a *App) addCleanupFunc(fn func()) {
 // convertToTMValidators converts TendermintValidator slice to TMValidators
 func (a *App) convertToTMValidators(validators []types.TendermintValidator, consensus *types.ConsensusStateResponse) types.TMValidators {
 	tmValidators := make(types.TMValidators, 0, len(validators))
-	
+
 	// Calculate total voting power first
 	totalVotingPower := int64(0)
 	for _, validator := range validators {
@@ -539,7 +639,7 @@ func (a *App) convertToTMValidators(validators []types.TendermintValidator, cons
 		}
 		totalVotingPower += votingPower
 	}
-	
+
 	for i, validator := range validators {
 		// Convert TendermintValidator to CometBFT Validator
 		cometValidator, err := a.convertToCometBFTValidator(validator)
@@ -547,7 +647,7 @@ func (a *App) convertToTMValidators(validators []types.TendermintValidator, cons
 			a.Logger.Error().Err(err).Str("address", validator.Address).Msg("Failed to convert validator")
 			continue
 		}
-		
+
 		// Calculate voting power percentage
 		votingPowerPercent := big.NewFloat(0)
 		if totalVotingPower > 0 {
@@ -556,13 +656,13 @@ func (a *App) convertToTMValidators(validators []types.TendermintValidator, cons
 			votingPowerPercent.Quo(validatorPower, total)
 			votingPowerPercent.Mul(votingPowerPercent, big.NewFloat(100))
 		}
-		
+
 		tmValidator := types.TMValidator{
 			Validator:          *cometValidator,
 			Index:              i,
 			VotingPowerPercent: votingPowerPercent,
 		}
-		
+
 		// Add chain validator info if available
 		if a.State.ChainValidators != nil {
 			for _, cv := range *a.State.ChainValidators {
@@ -572,10 +672,10 @@ func (a *App) convertToTMValidators(validators []types.TendermintValidator, cons
 				}
 			}
 		}
-		
+
 		tmValidators = append(tmValidators, tmValidator)
 	}
-	
+
 	return tmValidators
 }
 
@@ -586,14 +686,14 @@ func (a *App) convertToCometBFTValidator(validator types.TendermintValidator) (*
 	if err != nil {
 		return nil, fmt.Errorf("invalid voting power %s: %w", validator.VotingPower, err)
 	}
-	
+
 	// Parse public key - for now, create a simple ed25519 key
 	// This is a simplified approach since we primarily need the address and voting power for display
 	pubKeyBytes, err := utils.Base64ToBytes(validator.PubKey.PubKeyBase64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public key %s: %w", validator.PubKey.PubKeyBase64, err)
 	}
-	
+
 	// Create ed25519 public key (most common type)
 	var pubKey crypto.PubKey
 	if len(pubKeyBytes) == 32 { // ed25519 key length
@@ -602,9 +702,40 @@ func (a *App) convertToCometBFTValidator(validator types.TendermintValidator) (*
 		// Fallback: create a minimal implementation that just handles address generation
 		return nil, fmt.Errorf("unsupported public key type or length: %d", len(pubKeyBytes))
 	}
-	
+
 	// Create CometBFT validator using the constructor
 	cometValidator := ctypes.NewValidator(pubKey, votingPower)
-	
+
 	return cometValidator, nil
+}
+
+// DatabaseCleanupRoutine runs periodic database cleanup
+func (a *App) DatabaseCleanupRoutine() {
+	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
+	defer ticker.Stop()
+
+	// Run initial cleanup
+	ctx := context.Background()
+	if err := a.DB.CleanupOldData(ctx, db.Config{
+		DatabasePath:    a.Config.DatabasePath,
+		MaxRetainBlocks: a.Config.MaxRetainBlocks,
+		MaxRetainDays:   a.Config.MaxRetainDays,
+	}); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := a.DB.CleanupOldData(ctx, db.Config{
+				DatabasePath:    a.Config.DatabasePath,
+				MaxRetainBlocks: a.Config.MaxRetainBlocks,
+				MaxRetainDays:   a.Config.MaxRetainDays,
+			}); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
+			} else {
+				a.Logger.Debug().Msg("Database cleanup completed successfully")
+			}
+		}
+	}
 }

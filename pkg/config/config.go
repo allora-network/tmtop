@@ -25,6 +25,9 @@ type InputConfig struct {
 	Timezone              string
 	WithTopologyAPI       bool
 	TopologyListenAddr    string
+	DatabasePath          string
+	MaxRetainBlocks       int64
+	MaxRetainDays         int
 }
 
 type ChainType string
@@ -103,6 +106,9 @@ func ParseAndValidateConfig(input InputConfig) (*Config, error) {
 		Timezone:              timezone,
 		WithTopologyAPI:       input.WithTopologyAPI,
 		TopologyListenAddr:    input.TopologyListenAddr,
+		DatabasePath:          input.DatabasePath,
+		MaxRetainBlocks:       input.MaxRetainBlocks,
+		MaxRetainDays:         input.MaxRetainDays,
 	}
 
 	return config, nil
@@ -127,6 +133,9 @@ type Config struct {
 	Timezone              *time.Location
 	WithTopologyAPI       bool
 	TopologyListenAddr    string
+	DatabasePath          string
+	MaxRetainBlocks       int64
+	MaxRetainDays         int
 }
 
 func (c Config) GetProviderOrConsumerHost() string {
