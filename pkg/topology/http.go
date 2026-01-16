@@ -41,7 +41,6 @@ func WithHTTPTopologyAPI(state *types.State) tmhttp.Option {
 				http.Error(w, fmt.Sprintf("could not marshal dot: %s", err.Error()), http.StatusInternalServerError)
 				return
 			}
-
 		} else {
 			topoGraph, err := ComputeTopology(state, req)
 			if err != nil {

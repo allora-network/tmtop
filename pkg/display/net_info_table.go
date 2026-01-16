@@ -2,10 +2,11 @@ package display
 
 import (
 	"fmt"
-	"main/pkg/types"
-	"main/pkg/utils"
 	"slices"
 	"strings"
+
+	"main/pkg/types"
+	"main/pkg/utils"
 
 	"github.com/rivo/tview"
 )

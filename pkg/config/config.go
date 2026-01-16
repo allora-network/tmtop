@@ -28,6 +28,12 @@ type InputConfig struct {
 	DatabasePath          string
 	MaxRetainBlocks       int64
 	MaxRetainDays         int
+
+	// Analytics configuration
+	AnalyticsMode       bool
+	AnalyticsValidator  string
+	AnalyticsTimeWindow string
+	AnalyticsCommand    string
 }
 
 type ChainType string
@@ -109,6 +115,10 @@ func ParseAndValidateConfig(input InputConfig) (*Config, error) {
 		DatabasePath:          input.DatabasePath,
 		MaxRetainBlocks:       input.MaxRetainBlocks,
 		MaxRetainDays:         input.MaxRetainDays,
+		AnalyticsMode:         input.AnalyticsMode,
+		AnalyticsValidator:    input.AnalyticsValidator,
+		AnalyticsTimeWindow:   input.AnalyticsTimeWindow,
+		AnalyticsCommand:      input.AnalyticsCommand,
 	}
 
 	return config, nil
@@ -136,6 +146,12 @@ type Config struct {
 	DatabasePath          string
 	MaxRetainBlocks       int64
 	MaxRetainDays         int
+
+	// Analytics configuration
+	AnalyticsMode       bool
+	AnalyticsValidator  string
+	AnalyticsTimeWindow string
+	AnalyticsCommand    string
 }
 
 func (c Config) GetProviderOrConsumerHost() string {

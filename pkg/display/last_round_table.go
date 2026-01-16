@@ -2,9 +2,10 @@ package display
 
 import (
 	"fmt"
+	"strconv"
+
 	"main/pkg/types"
 	"main/pkg/utils"
-	"strconv"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/gdamore/tcell/v2"
@@ -91,7 +92,7 @@ func (d *LastRoundTableData) GetColumnCount() int {
 	return len(d.cells[0])
 }
 
-// SetTMValidators sets the unified validator collection (preferred)
+// SetTMValidators sets the unified validator collection (preferred).
 func (d *LastRoundTableData) SetTMValidators(validators types.TMValidators, consensusError error) {
 	d.mutex.Lock()
 	d.TMValidators = validators
@@ -101,7 +102,7 @@ func (d *LastRoundTableData) SetTMValidators(validators types.TMValidators, cons
 	d.redrawData()
 }
 
-// SetRoundData sets the round data map for vote tracking
+// SetRoundData sets the round data map for vote tracking.
 func (d *LastRoundTableData) SetRoundData(roundData *types.RoundDataMap) {
 	d.mutex.Lock()
 	d.RoundData = roundData
@@ -110,7 +111,7 @@ func (d *LastRoundTableData) SetRoundData(roundData *types.RoundDataMap) {
 	d.redrawData()
 }
 
-// SetCurrentRound sets the current height and round for display
+// SetCurrentRound sets the current height and round for display.
 func (d *LastRoundTableData) SetCurrentRound(height int64, round int32) {
 	d.mutex.Lock()
 	d.CurrentHeight = height
@@ -187,7 +188,7 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 	return cells
 }
 
-// generateValidatorDisplayText creates validator display text using RoundDataMap data
+// generateValidatorDisplayText creates validator display text using RoundDataMap data.
 func (d *LastRoundTableData) generateValidatorDisplayText(validator types.TMValidator) string {
 	name := validator.GetDisplayName()
 	if validator.HasAssignedKey() {

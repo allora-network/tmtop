@@ -19,14 +19,14 @@ type DB struct {
 }
 
 type Config struct {
-	DatabasePath   string
-	MaxRetainDays  int // How many days of data to retain
+	DatabasePath    string
+	MaxRetainDays   int   // How many days of data to retain
 	MaxRetainBlocks int64 // How many blocks of data to retain (alternative to days)
 }
 
 func New(config Config) (*DB, error) {
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(config.DatabasePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(config.DatabasePath), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -72,7 +72,7 @@ func (d *DB) DB() *sql.DB {
 	return d.db
 }
 
-// WithTx executes a function within a database transaction
+// WithTx executes a function within a database transaction.
 func (d *DB) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -88,15 +88,41 @@ func (d *DB) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	return tx.Commit()
 }
 
-// migrate runs database migrations
+// migrate runs database migrations.
 func (d *DB) migrate() error {
+	// Create migrations table if it doesn't exist
+	createMigrationsTable := `
+		CREATE TABLE IF NOT EXISTS migrations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			version TEXT NOT NULL UNIQUE,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+	`
+
+	if _, err := d.db.Exec(createMigrationsTable); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+
+	// Check if migration 001_initial has been applied
+	var count int
+	err := d.db.QueryRow("SELECT COUNT(*) FROM migrations WHERE version = '001_initial'").Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check migration status: %w", err)
+	}
+
+	// If migration already applied, skip it
+	if count > 0 {
+		return nil
+	}
+
 	// Read migration file
 	migrationSQL := `-- Initial schema for tmtop database
 
 -- Validators table to store validator information
-CREATE TABLE IF NOT EXISTS validators (
+CREATE TABLE validators (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    address TEXT NOT NULL UNIQUE,
+    operator_address TEXT NOT NULL UNIQUE,
+    hex_address TEXT NOT NULL UNIQUE,
     public_key TEXT NOT NULL,
     voting_power INTEGER NOT NULL,
     moniker TEXT,
@@ -105,21 +131,22 @@ CREATE TABLE IF NOT EXISTS validators (
 );
 
 -- Index for fast validator lookups
-CREATE INDEX IF NOT EXISTS idx_validators_address ON validators(address);
+CREATE INDEX idx_validators_hex_address ON validators(hex_address);
+CREATE INDEX idx_validators_operator_address ON validators(operator_address);
 
 -- Heights table to store block height information
-CREATE TABLE IF NOT EXISTS heights (
+CREATE TABLE heights (
     height INTEGER PRIMARY KEY,
     block_hash TEXT,
     block_time DATETIME,
     proposer_address TEXT,
     total_validators INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (proposer_address) REFERENCES validators(address)
+    FOREIGN KEY (proposer_address) REFERENCES validators(hex_address)
 );
 
 -- Rounds table to store consensus round information
-CREATE TABLE IF NOT EXISTS rounds (
+CREATE TABLE rounds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     height INTEGER NOT NULL,
     round_number INTEGER NOT NULL,
@@ -129,36 +156,36 @@ CREATE TABLE IF NOT EXISTS rounds (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(height, round_number),
     FOREIGN KEY (height) REFERENCES heights(height),
-    FOREIGN KEY (proposer_address) REFERENCES validators(address)
+    FOREIGN KEY (proposer_address) REFERENCES validators(hex_address)
 );
 
 -- Index for efficient round queries
-CREATE INDEX IF NOT EXISTS idx_rounds_height_round ON rounds(height, round_number);
-CREATE INDEX IF NOT EXISTS idx_rounds_height_desc ON rounds(height DESC);
+CREATE INDEX idx_rounds_height_round ON rounds(height, round_number);
+CREATE INDEX idx_rounds_height_desc ON rounds(height DESC);
 
 -- Votes table to store individual validator votes
-CREATE TABLE IF NOT EXISTS votes (
+CREATE TABLE votes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     height INTEGER NOT NULL,
     round_number INTEGER NOT NULL,
-    validator_address TEXT NOT NULL,
+    validator_hex_address TEXT NOT NULL,
     vote_type INTEGER NOT NULL, -- 1 = prevote, 2 = precommit
     block_hash TEXT, -- NULL for nil votes
     signature TEXT,
     timestamp DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(height, round_number, validator_address, vote_type),
+    UNIQUE(height, round_number, validator_hex_address, vote_type),
     FOREIGN KEY (height) REFERENCES heights(height),
-    FOREIGN KEY (validator_address) REFERENCES validators(address)
+    FOREIGN KEY (validator_hex_address) REFERENCES validators(hex_address)
 );
 
 -- Indexes for efficient vote queries
-CREATE INDEX IF NOT EXISTS idx_votes_height_round ON votes(height, round_number);
-CREATE INDEX IF NOT EXISTS idx_votes_validator ON votes(validator_address);
-CREATE INDEX IF NOT EXISTS idx_votes_height_round_type ON votes(height, round_number, vote_type);
+CREATE INDEX idx_votes_height_round ON votes(height, round_number);
+CREATE INDEX idx_votes_validator ON votes(validator_hex_address);
+CREATE INDEX idx_votes_height_round_type ON votes(height, round_number, vote_type);
 
 -- Consensus events table for tracking important consensus milestones
-CREATE TABLE IF NOT EXISTS consensus_events (
+CREATE TABLE consensus_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     height INTEGER NOT NULL,
     round_number INTEGER NOT NULL,
@@ -170,34 +197,43 @@ CREATE TABLE IF NOT EXISTS consensus_events (
 );
 
 -- Index for consensus event queries
-CREATE INDEX IF NOT EXISTS idx_consensus_events_height_round ON consensus_events(height, round_number);
-CREATE INDEX IF NOT EXISTS idx_consensus_events_type ON consensus_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_consensus_events_timestamp ON consensus_events(timestamp);
+CREATE INDEX idx_consensus_events_height_round ON consensus_events(height, round_number);
+CREATE INDEX idx_consensus_events_type ON consensus_events(event_type);
+CREATE INDEX idx_consensus_events_timestamp ON consensus_events(timestamp);
 
 -- Validator snapshots table to track voting power changes over time
-CREATE TABLE IF NOT EXISTS validator_snapshots (
+CREATE TABLE validator_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     height INTEGER NOT NULL,
-    validator_address TEXT NOT NULL,
+    validator_hex_address TEXT NOT NULL,
     voting_power INTEGER NOT NULL,
     voting_power_percent REAL,
     is_proposer BOOLEAN DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(height, validator_address),
+    UNIQUE(height, validator_hex_address),
     FOREIGN KEY (height) REFERENCES heights(height),
-    FOREIGN KEY (validator_address) REFERENCES validators(address)
+    FOREIGN KEY (validator_hex_address) REFERENCES validators(hex_address)
 );
 
 -- Index for efficient validator snapshot queries
-CREATE INDEX IF NOT EXISTS idx_validator_snapshots_height ON validator_snapshots(height);
-CREATE INDEX IF NOT EXISTS idx_validator_snapshots_validator ON validator_snapshots(validator_address);`
+CREATE INDEX idx_validator_snapshots_height ON validator_snapshots(height);
+CREATE INDEX idx_validator_snapshots_validator ON validator_snapshots(validator_hex_address);`
 
 	// Execute migration
-	_, err := d.db.Exec(migrationSQL)
-	return err
+	if _, err := d.db.Exec(migrationSQL); err != nil {
+		return fmt.Errorf("failed to execute migration: %w", err)
+	}
+
+	// Record that migration was applied
+	_, err = d.db.Exec("INSERT INTO migrations (version) VALUES ('001_initial')")
+	if err != nil {
+		return fmt.Errorf("failed to record migration: %w", err)
+	}
+
+	return nil
 }
 
-// CleanupOldData removes data older than the configured retention period
+// CleanupOldData removes data older than the configured retention period.
 func (d *DB) CleanupOldData(ctx context.Context, config Config) error {
 	var cutoffHeight int64
 

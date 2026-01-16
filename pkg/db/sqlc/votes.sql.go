@@ -11,26 +11,26 @@ import (
 )
 
 const createVote = `-- name: CreateVote :one
-INSERT INTO votes (height, round_number, validator_address, vote_type, block_hash, signature, timestamp)
+INSERT INTO votes (height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at
+RETURNING id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at
 `
 
 type CreateVoteParams struct {
-	Height           int64          `json:"height"`
-	RoundNumber      int64          `json:"round_number"`
-	ValidatorAddress string         `json:"validator_address"`
-	VoteType         int64          `json:"vote_type"`
-	BlockHash        sql.NullString `json:"block_hash"`
-	Signature        sql.NullString `json:"signature"`
-	Timestamp        sql.NullTime   `json:"timestamp"`
+	Height              int64          `json:"height"`
+	RoundNumber         int64          `json:"round_number"`
+	ValidatorHexAddress string         `json:"validator_hex_address"`
+	VoteType            int64          `json:"vote_type"`
+	BlockHash           sql.NullString `json:"block_hash"`
+	Signature           sql.NullString `json:"signature"`
+	Timestamp           sql.NullTime   `json:"timestamp"`
 }
 
 func (q *Queries) CreateVote(ctx context.Context, arg CreateVoteParams) (Vote, error) {
 	row := q.queryRow(ctx, q.createVoteStmt, createVote,
 		arg.Height,
 		arg.RoundNumber,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VoteType,
 		arg.BlockHash,
 		arg.Signature,
@@ -41,7 +41,7 @@ func (q *Queries) CreateVote(ctx context.Context, arg CreateVoteParams) (Vote, e
 		&i.ID,
 		&i.Height,
 		&i.RoundNumber,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VoteType,
 		&i.BlockHash,
 		&i.Signature,
@@ -61,23 +61,23 @@ func (q *Queries) DeleteVotesOlderThan(ctx context.Context, height int64) error 
 }
 
 const getVote = `-- name: GetVote :one
-SELECT id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
-WHERE height = ? AND round_number = ? AND validator_address = ? AND vote_type = ?
+SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
+WHERE height = ? AND round_number = ? AND validator_hex_address = ? AND vote_type = ?
 LIMIT 1
 `
 
 type GetVoteParams struct {
-	Height           int64  `json:"height"`
-	RoundNumber      int64  `json:"round_number"`
-	ValidatorAddress string `json:"validator_address"`
-	VoteType         int64  `json:"vote_type"`
+	Height              int64  `json:"height"`
+	RoundNumber         int64  `json:"round_number"`
+	ValidatorHexAddress string `json:"validator_hex_address"`
+	VoteType            int64  `json:"vote_type"`
 }
 
 func (q *Queries) GetVote(ctx context.Context, arg GetVoteParams) (Vote, error) {
 	row := q.queryRow(ctx, q.getVoteStmt, getVote,
 		arg.Height,
 		arg.RoundNumber,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VoteType,
 	)
 	var i Vote
@@ -85,7 +85,7 @@ func (q *Queries) GetVote(ctx context.Context, arg GetVoteParams) (Vote, error) 
 		&i.ID,
 		&i.Height,
 		&i.RoundNumber,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VoteType,
 		&i.BlockHash,
 		&i.Signature,
@@ -96,9 +96,9 @@ func (q *Queries) GetVote(ctx context.Context, arg GetVoteParams) (Vote, error) 
 }
 
 const getVotesByType = `-- name: GetVotesByType :many
-SELECT id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
+SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
 WHERE height = ? AND round_number = ? AND vote_type = ?
-ORDER BY validator_address
+ORDER BY validator_hex_address
 `
 
 type GetVotesByTypeParams struct {
@@ -120,7 +120,7 @@ func (q *Queries) GetVotesByType(ctx context.Context, arg GetVotesByTypeParams) 
 			&i.ID,
 			&i.Height,
 			&i.RoundNumber,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VoteType,
 			&i.BlockHash,
 			&i.Signature,
@@ -141,7 +141,7 @@ func (q *Queries) GetVotesByType(ctx context.Context, arg GetVotesByTypeParams) 
 }
 
 const getVotesForHeight = `-- name: GetVotesForHeight :many
-SELECT id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at FROM votes WHERE height = ? ORDER BY round_number, vote_type, validator_address
+SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at FROM votes WHERE height = ? ORDER BY round_number, vote_type, validator_hex_address
 `
 
 func (q *Queries) GetVotesForHeight(ctx context.Context, height int64) ([]Vote, error) {
@@ -157,7 +157,7 @@ func (q *Queries) GetVotesForHeight(ctx context.Context, height int64) ([]Vote, 
 			&i.ID,
 			&i.Height,
 			&i.RoundNumber,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VoteType,
 			&i.BlockHash,
 			&i.Signature,
@@ -178,9 +178,9 @@ func (q *Queries) GetVotesForHeight(ctx context.Context, height int64) ([]Vote, 
 }
 
 const getVotesForRound = `-- name: GetVotesForRound :many
-SELECT id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
+SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
 WHERE height = ? AND round_number = ?
-ORDER BY vote_type, validator_address
+ORDER BY vote_type, validator_hex_address
 `
 
 type GetVotesForRoundParams struct {
@@ -201,7 +201,7 @@ func (q *Queries) GetVotesForRound(ctx context.Context, arg GetVotesForRoundPara
 			&i.ID,
 			&i.Height,
 			&i.RoundNumber,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VoteType,
 			&i.BlockHash,
 			&i.Signature,
@@ -222,18 +222,18 @@ func (q *Queries) GetVotesForRound(ctx context.Context, arg GetVotesForRoundPara
 }
 
 const getVotesForValidator = `-- name: GetVotesForValidator :many
-SELECT id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
-WHERE validator_address = ? AND height >= ?
+SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at FROM votes 
+WHERE validator_hex_address = ? AND height >= ?
 ORDER BY height DESC, round_number DESC
 `
 
 type GetVotesForValidatorParams struct {
-	ValidatorAddress string `json:"validator_address"`
-	Height           int64  `json:"height"`
+	ValidatorHexAddress string `json:"validator_hex_address"`
+	Height              int64  `json:"height"`
 }
 
 func (q *Queries) GetVotesForValidator(ctx context.Context, arg GetVotesForValidatorParams) ([]Vote, error) {
-	rows, err := q.query(ctx, q.getVotesForValidatorStmt, getVotesForValidator, arg.ValidatorAddress, arg.Height)
+	rows, err := q.query(ctx, q.getVotesForValidatorStmt, getVotesForValidator, arg.ValidatorHexAddress, arg.Height)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +245,7 @@ func (q *Queries) GetVotesForValidator(ctx context.Context, arg GetVotesForValid
 			&i.ID,
 			&i.Height,
 			&i.RoundNumber,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VoteType,
 			&i.BlockHash,
 			&i.Signature,
@@ -271,7 +271,7 @@ SELECT
     SUM(CASE WHEN v.vote_type = 2 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as precommit_power,
     SUM(vs.voting_power) as total_power
 FROM votes v
-JOIN validator_snapshots vs ON v.validator_address = vs.validator_address AND v.height = vs.height
+JOIN validator_snapshots vs ON v.validator_hex_address = vs.validator_hex_address AND v.height = vs.height
 WHERE v.height = ? AND v.round_number = ?
 `
 
@@ -294,30 +294,30 @@ func (q *Queries) GetVotingPowerForRound(ctx context.Context, arg GetVotingPower
 }
 
 const upsertVote = `-- name: UpsertVote :one
-INSERT INTO votes (height, round_number, validator_address, vote_type, block_hash, signature, timestamp)
+INSERT INTO votes (height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(height, round_number, validator_address, vote_type) DO UPDATE SET
+ON CONFLICT(height, round_number, validator_hex_address, vote_type) DO UPDATE SET
     block_hash = excluded.block_hash,
     signature = excluded.signature,
     timestamp = excluded.timestamp
-RETURNING id, height, round_number, validator_address, vote_type, block_hash, signature, timestamp, created_at
+RETURNING id, height, round_number, validator_hex_address, vote_type, block_hash, signature, timestamp, created_at
 `
 
 type UpsertVoteParams struct {
-	Height           int64          `json:"height"`
-	RoundNumber      int64          `json:"round_number"`
-	ValidatorAddress string         `json:"validator_address"`
-	VoteType         int64          `json:"vote_type"`
-	BlockHash        sql.NullString `json:"block_hash"`
-	Signature        sql.NullString `json:"signature"`
-	Timestamp        sql.NullTime   `json:"timestamp"`
+	Height              int64          `json:"height"`
+	RoundNumber         int64          `json:"round_number"`
+	ValidatorHexAddress string         `json:"validator_hex_address"`
+	VoteType            int64          `json:"vote_type"`
+	BlockHash           sql.NullString `json:"block_hash"`
+	Signature           sql.NullString `json:"signature"`
+	Timestamp           sql.NullTime   `json:"timestamp"`
 }
 
 func (q *Queries) UpsertVote(ctx context.Context, arg UpsertVoteParams) (Vote, error) {
 	row := q.queryRow(ctx, q.upsertVoteStmt, upsertVote,
 		arg.Height,
 		arg.RoundNumber,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VoteType,
 		arg.BlockHash,
 		arg.Signature,
@@ -328,7 +328,7 @@ func (q *Queries) UpsertVote(ctx context.Context, arg UpsertVoteParams) (Vote, e
 		&i.ID,
 		&i.Height,
 		&i.RoundNumber,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VoteType,
 		&i.BlockHash,
 		&i.Signature,

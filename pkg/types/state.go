@@ -24,22 +24,17 @@ type State struct {
 	Step      int64
 	StartTime time.Time
 
-	// Unified validator collection
-	TMValidators TMValidators
+	TMValidators       TMValidators
+	validatorsByPeerID map[string]TMValidator
 
-	// Chain metadata
-	ChainValidators *ChainValidators
-	ChainInfo       *TendermintStatusResult
-	Upgrade         *Upgrade
-	BlockTime       time.Duration
-	NetInfo         *NetInfo
+	ChainInfo *CometNodeStatus
+	Upgrade   *Upgrade
+	BlockTime time.Duration
+	NetInfo   *NetInfo
 
 	// Vote and proposal tracking
 	VotesByRound     *RoundDataMap
 	ProposalsByRound *butils.SortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]]
-
-	// Simplified validator tracking
-	validatorsByPeerID map[string]TMValidator
 
 	// RPC management
 	currentRPC string
@@ -81,7 +76,6 @@ func NewState(firstRPC string, logger zerolog.Logger) *State {
 		Step:               0,
 		StartTime:          time.Now(),
 		TMValidators:       TMValidators{},
-		ChainValidators:    nil,
 		VotesByRound:       NewRoundDataMap(),
 		ProposalsByRound:   butils.NewSortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]](),
 		BlockTime:          0,
@@ -91,24 +85,6 @@ func NewState(firstRPC string, logger zerolog.Logger) *State {
 		rpcPeers:           butils.NewOrderedMap[string, []Peer](),
 		muRPCs:             &sync.RWMutex{},
 	}
-}
-
-func (s *State) Clear() {
-	s.Height = 0
-	s.Round = 0
-	s.Step = 0
-	s.TMValidators = TMValidators{}
-	s.ChainValidators = nil
-	s.ChainInfo = nil
-	s.StartTime = time.Now()
-	s.Upgrade = nil
-	s.BlockTime = time.Duration(0)
-	s.NetInfo = nil
-	s.ConsensusStateError = nil
-	s.ValidatorsError = nil
-	s.ChainValidatorsError = nil
-	s.UpgradePlanError = nil
-	s.ChainInfoError = nil
 }
 
 func (s *State) CurrentRPC() RPC {
@@ -192,7 +168,6 @@ func (s *State) ValidatorsByPeerID() map[string]TMValidator {
 }
 
 func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
-	s.logger.Error().Msg("AddCometBFTEvents")
 	for _, event := range events {
 		switch x := event.(type) {
 		case ctypes.EventDataNewRound:
@@ -204,11 +179,7 @@ func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
 	}
 }
 
-func (s *State) SetChainValidators(validators *ChainValidators) {
-	s.ChainValidators = validators
-}
-
-func (s *State) SetChainInfo(info *TendermintStatusResult) {
+func (s *State) SetChainInfo(info *CometNodeStatus) {
 	s.ChainInfo = info
 }
 
@@ -400,17 +371,17 @@ func (s *State) SerializePrecommitsProgressbar(width int, height int) string {
 
 // TMValidator-based methods
 
-// GetTMValidators returns the unified validator collection
+// GetTMValidators returns the unified validator collection.
 func (s *State) GetTMValidators() TMValidators {
 	return s.TMValidators
 }
 
-// SetTMValidators sets the unified validator collection
+// SetTMValidators sets the unified validator collection.
 func (s *State) SetTMValidators(validators TMValidators) {
 	s.TMValidators = validators
 }
 
-// UpdateTMValidatorsWithRoundVotes updates current round vote state for all validators
+// UpdateTMValidatorsWithRoundVotes updates current round vote state for all validators.
 func (s *State) UpdateTMValidatorsWithRoundVotes(height int64, round int32) {
 	for i := range s.TMValidators {
 		validator := &s.TMValidators[i]
@@ -424,21 +395,6 @@ func (s *State) UpdateTMValidatorsWithRoundVotes(height int64, round int32) {
 		}
 
 		validator.CurrentRoundVote = roundVoteState
-	}
-}
-
-// SyncTMValidatorsWithChainValidators updates TMValidators with chain validator metadata
-func (s *State) SyncTMValidatorsWithChainValidators() {
-	if s.ChainValidators == nil {
-		return
-	}
-
-	chainValidatorsMap := s.ChainValidators.ToMap()
-	for i := range s.TMValidators {
-		validator := &s.TMValidators[i]
-		if chainValidator, ok := chainValidatorsMap[validator.GetDisplayAddress()]; ok {
-			validator.ChainValidator = &chainValidator
-		}
 	}
 }
 
@@ -581,7 +537,7 @@ func (v *RoundDataMap) upsertRoundData(height int64, round int32) *RoundData {
 	return roundData
 }
 
-// GetTotalVotingPowerPrevotedPercent calculates percentage using RoundDataMap
+// GetTotalVotingPowerPrevotedPercent calculates percentage using RoundDataMap.
 func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
 	if len(s.TMValidators) == 0 {
 		return big.NewFloat(0)
@@ -611,7 +567,7 @@ func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.F
 	return votingPowerPercent
 }
 
-// GetTotalVotingPowerPrecommittedPercent calculates percentage using RoundDataMap
+// GetTotalVotingPowerPrecommittedPercent calculates percentage using RoundDataMap.
 func (s *State) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
 	if len(s.TMValidators) == 0 {
 		return big.NewFloat(0)

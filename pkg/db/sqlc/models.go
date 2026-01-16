@@ -39,33 +39,34 @@ type Round struct {
 }
 
 type Validator struct {
-	ID          int64          `json:"id"`
-	Address     string         `json:"address"`
-	PublicKey   string         `json:"public_key"`
-	VotingPower int64          `json:"voting_power"`
-	Moniker     sql.NullString `json:"moniker"`
-	CreatedAt   sql.NullTime   `json:"created_at"`
-	UpdatedAt   sql.NullTime   `json:"updated_at"`
+	ID              int64          `json:"id"`
+	OperatorAddress string         `json:"operator_address"`
+	HexAddress      string         `json:"hex_address"`
+	PublicKey       string         `json:"public_key"`
+	VotingPower     int64          `json:"voting_power"`
+	Moniker         sql.NullString `json:"moniker"`
+	CreatedAt       sql.NullTime   `json:"created_at"`
+	UpdatedAt       sql.NullTime   `json:"updated_at"`
 }
 
 type ValidatorSnapshot struct {
-	ID                 int64           `json:"id"`
-	Height             int64           `json:"height"`
-	ValidatorAddress   string          `json:"validator_address"`
-	VotingPower        int64           `json:"voting_power"`
-	VotingPowerPercent sql.NullFloat64 `json:"voting_power_percent"`
-	IsProposer         sql.NullBool    `json:"is_proposer"`
-	CreatedAt          sql.NullTime    `json:"created_at"`
+	ID                  int64           `json:"id"`
+	Height              int64           `json:"height"`
+	ValidatorHexAddress string          `json:"validator_hex_address"`
+	VotingPower         int64           `json:"voting_power"`
+	VotingPowerPercent  sql.NullFloat64 `json:"voting_power_percent"`
+	IsProposer          sql.NullBool    `json:"is_proposer"`
+	CreatedAt           sql.NullTime    `json:"created_at"`
 }
 
 type Vote struct {
-	ID               int64          `json:"id"`
-	Height           int64          `json:"height"`
-	RoundNumber      int64          `json:"round_number"`
-	ValidatorAddress string         `json:"validator_address"`
-	VoteType         int64          `json:"vote_type"`
-	BlockHash        sql.NullString `json:"block_hash"`
-	Signature        sql.NullString `json:"signature"`
-	Timestamp        sql.NullTime   `json:"timestamp"`
-	CreatedAt        sql.NullTime   `json:"created_at"`
+	ID                  int64          `json:"id"`
+	Height              int64          `json:"height"`
+	RoundNumber         int64          `json:"round_number"`
+	ValidatorHexAddress string         `json:"validator_hex_address"`
+	VoteType            int64          `json:"vote_type"`
+	BlockHash           sql.NullString `json:"block_hash"`
+	Signature           sql.NullString `json:"signature"`
+	Timestamp           sql.NullTime   `json:"timestamp"`
+	CreatedAt           sql.NullTime   `json:"created_at"`
 }

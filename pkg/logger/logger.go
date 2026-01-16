@@ -2,8 +2,9 @@ package logger
 
 import (
 	"io"
-	configPkg "main/pkg/config"
 	"os"
+
+	configPkg "main/pkg/config"
 
 	"github.com/rs/zerolog"
 )
@@ -25,7 +26,7 @@ func NewWriter(logChannel chan string, config *configPkg.Config) Writer {
 	}
 
 	if config.DebugFile != "" {
-		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0755)
+		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o755)
 		if err != nil {
 			panic(err)
 		}

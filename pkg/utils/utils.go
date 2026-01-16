@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
-	loggerPkg "main/pkg/logger"
 	"math"
 	"strconv"
 	"time"
+
+	loggerPkg "main/pkg/logger"
 
 	"github.com/btcsuite/btcutil/bech32"
 	"github.com/cometbft/cometbft/crypto"
@@ -126,7 +127,7 @@ func CompareTwoBech32(first, second string) (bool, error) {
 	return bytes.Equal(firstBytes, secondBytes), nil
 }
 
-// HexToBytes converts a hex string to bytes
+// HexToBytes converts a hex string to bytes.
 func HexToBytes(hexStr string) ([]byte, error) {
 	// Remove 0x prefix if present
 	if len(hexStr) >= 2 && hexStr[:2] == "0x" {
@@ -135,7 +136,7 @@ func HexToBytes(hexStr string) ([]byte, error) {
 	return hex.DecodeString(hexStr)
 }
 
-// Base64ToBytes converts a base64 string to bytes
+// Base64ToBytes converts a base64 string to bytes.
 func Base64ToBytes(base64Str string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(base64Str)
 }

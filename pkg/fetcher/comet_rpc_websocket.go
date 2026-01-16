@@ -187,7 +187,7 @@ func (ws *CometRPCWebsocket) resetConnection() {
 	}
 }
 
-// terminateConnection closes the websocket connection and cleans up resources permanently
+// terminateConnection closes the websocket connection and cleans up resources permanently.
 func (ws *CometRPCWebsocket) terminateConnection() {
 	ws.muConn.Lock()
 	defer ws.muConn.Unlock()

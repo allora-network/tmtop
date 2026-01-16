@@ -19,9 +19,11 @@ type Querier interface {
 	DeleteConsensusEventsOlderThan(ctx context.Context, height int64) error
 	DeleteHeightsOlderThan(ctx context.Context, height int64) error
 	DeleteRoundsOlderThan(ctx context.Context, height int64) error
-	DeleteValidator(ctx context.Context, address string) error
+	DeleteValidator(ctx context.Context, hexAddress string) error
 	DeleteValidatorSnapshotsOlderThan(ctx context.Context, height int64) error
 	DeleteVotesOlderThan(ctx context.Context, height int64) error
+	// Get signing efficiency for all validators over a time window
+	GetAllValidatorsSigningEfficiency(ctx context.Context, arg GetAllValidatorsSigningEfficiencyParams) ([]GetAllValidatorsSigningEfficiencyRow, error)
 	GetConsensusEvent(ctx context.Context, id int64) (ConsensusEvent, error)
 	GetConsensusEventsByType(ctx context.Context, arg GetConsensusEventsByTypeParams) ([]ConsensusEvent, error)
 	GetConsensusEventsForHeight(ctx context.Context, height int64) ([]ConsensusEvent, error)
@@ -29,15 +31,29 @@ type Querier interface {
 	GetHeight(ctx context.Context, height int64) (Height, error)
 	GetHeights(ctx context.Context, limit int64) ([]Height, error)
 	GetLatestHeight(ctx context.Context) (Height, error)
+	// Calculate proposer performance metrics (when validator is selected as proposer)
+	GetProposerPerformance(ctx context.Context, arg GetProposerPerformanceParams) (GetProposerPerformanceRow, error)
 	GetRecentConsensusEvents(ctx context.Context, limit int64) ([]ConsensusEvent, error)
 	GetRecentRounds(ctx context.Context, limit int64) ([]Round, error)
 	GetRound(ctx context.Context, arg GetRoundParams) (Round, error)
 	GetRoundsForHeight(ctx context.Context, height int64) ([]Round, error)
 	GetRoundsInRange(ctx context.Context, arg GetRoundsInRangeParams) ([]Round, error)
-	GetValidator(ctx context.Context, address string) (Validator, error)
+	GetValidator(ctx context.Context, hexAddress string) (Validator, error)
+	// Calculate consensus participation rates for prevotes and precommits
+	GetValidatorConsensusParticipation(ctx context.Context, arg GetValidatorConsensusParticipationParams) (GetValidatorConsensusParticipationRow, error)
+	// Find consecutive missed block sequences for a validator
+	GetValidatorMissedBlockStreaks(ctx context.Context, arg GetValidatorMissedBlockStreaksParams) ([]GetValidatorMissedBlockStreaksRow, error)
+	// Get signing efficiency over time buckets (hourly)
+	GetValidatorPerformanceTimeSeries(ctx context.Context, arg GetValidatorPerformanceTimeSeriesParams) ([]GetValidatorPerformanceTimeSeriesRow, error)
+	// Get validator performance ranking with multiple metrics
+	GetValidatorRanking(ctx context.Context, arg GetValidatorRankingParams) ([]GetValidatorRankingRow, error)
+	// Calculate signing efficiency for a validator over a time window
+	GetValidatorSigningEfficiency(ctx context.Context, arg GetValidatorSigningEfficiencyParams) (GetValidatorSigningEfficiencyRow, error)
 	GetValidatorSnapshot(ctx context.Context, arg GetValidatorSnapshotParams) (ValidatorSnapshot, error)
 	GetValidatorSnapshotsForHeight(ctx context.Context, height int64) ([]ValidatorSnapshot, error)
 	GetValidatorSnapshotsForValidator(ctx context.Context, arg GetValidatorSnapshotsForValidatorParams) ([]ValidatorSnapshot, error)
+	// Calculate validator uptime metrics over time window
+	GetValidatorUptime(ctx context.Context, arg GetValidatorUptimeParams) (GetValidatorUptimeRow, error)
 	GetValidators(ctx context.Context) ([]Validator, error)
 	GetValidatorsByHeight(ctx context.Context, height int64) ([]GetValidatorsByHeightRow, error)
 	GetVote(ctx context.Context, arg GetVoteParams) (Vote, error)

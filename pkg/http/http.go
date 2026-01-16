@@ -2,9 +2,10 @@ package http
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -25,6 +26,14 @@ func NewClient(logger zerolog.Logger, invoker, host string) *Client {
 	}
 }
 
+func (c *Client) join(host, rest string) string {
+	base, _ := url.Parse(host)
+	ref, _ := url.Parse(rest)
+
+	base.Path = path.Join(base.Path, ref.Path)
+	return base.String()
+}
+
 func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	var transport http.RoundTripper
 
@@ -38,7 +47,7 @@ func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	client := &http.Client{Timeout: 300 * time.Second, Transport: transport}
 	start := time.Now()
 
-	fullURL := fmt.Sprintf("%s%s", c.Host, relativeURL)
+	fullURL := c.join(c.Host, relativeURL)
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -60,7 +69,7 @@ func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	return res.Body, nil
 }
 
-func (c *Client) Get(relativeURL string, target interface{}) error {
+func (c *Client) Get(relativeURL string, target any) error {
 	body, err := c.GetInternal(relativeURL)
 	if err != nil {
 		return err
@@ -75,7 +84,6 @@ func (c *Client) Get(relativeURL string, target interface{}) error {
 
 func (c *Client) GetPlain(relativeURL string) ([]byte, error) {
 	body, err := c.GetInternal(relativeURL)
-
 	if err != nil {
 		return nil, err
 	}

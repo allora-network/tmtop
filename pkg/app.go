@@ -3,6 +3,13 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"main/pkg/analytics"
 	configPkg "main/pkg/config"
 	"main/pkg/db"
 	"main/pkg/display"
@@ -11,18 +18,9 @@ import (
 	loggerPkg "main/pkg/logger"
 	"main/pkg/topology"
 	"main/pkg/types"
-	"main/pkg/utils"
-	"math/big"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	butils "github.com/brynbellomy/go-utils"
-	"github.com/cometbft/cometbft/crypto"
-	"github.com/cometbft/cometbft/crypto/ed25519"
+	cnstypes "github.com/cometbft/cometbft/consensus/types"
 	ctypes "github.com/cometbft/cometbft/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog"
@@ -39,9 +37,7 @@ type App struct {
 	DB             *db.DB
 	ConsensusStore *db.ConsensusStore
 
-	TendermintClient  *fetcher.TendermintRPC
-	DataFetcher       fetcher.DataFetcher
-	CometRPCWebsocket *fetcher.CometRPCWebsocket
+	DataFetcher *fetcher.DataFetcher
 
 	mbRPCURLs        *butils.Mailbox[string]
 	rpcURLsLastFetch map[string]time.Time
@@ -49,7 +45,6 @@ type App struct {
 	PauseChannel chan bool
 	IsPaused     bool
 
-	// Terminal state management
 	cleanupFuncs []func()
 }
 
@@ -68,7 +63,9 @@ func NewApp(config *configPkg.Config, version string) *App {
 	var database *db.DB
 	var consensusStore *db.ConsensusStore
 
-	if config.DatabasePath != "" || config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
+	fmt.Println("max retain days", config.MaxRetainDays)
+
+	if config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
 		dbPath := config.DatabasePath
 		if dbPath == "" {
 			// Use default path: ~/.config/tmtop/tmtop.db
@@ -92,34 +89,41 @@ func NewApp(config *configPkg.Config, version string) *App {
 		var err error
 		database, err = db.New(dbConfig)
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to initialize database, continuing without persistence")
-		} else {
-			consensusStore = db.NewConsensusStore(database, logger)
-			logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
+			fmt.Println("Failed to initialize database:", err)
+			os.Exit(-1)
 		}
+
+		consensusStore = db.NewConsensusStore(database, logger)
+		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
 
+	fmt.Println("DB:", database)
+
 	return &App{
-		Logger:            logger,
-		Version:           version,
-		Config:            config,
-		DisplayWrapper:    display.NewWrapper(config, state, logger, pauseChannel, version),
-		State:             state,
-		LogChannel:        logChannel,
-		DB:                database,
-		ConsensusStore:    consensusStore,
-		TendermintClient:  fetcher.NewTendermintRPC(config, state, logger),
-		DataFetcher:       fetcher.GetDataFetcher(config, state, logger),
-		CometRPCWebsocket: fetcher.NewCometRPCWebsocket(config.RPCHost, logger),
-		mbRPCURLs:         butils.NewMailbox[string](1000),
-		rpcURLsLastFetch:  make(map[string]time.Time),
-		PauseChannel:      pauseChannel,
-		IsPaused:          false,
-		cleanupFuncs:      make([]func(), 0),
+		Logger:           logger,
+		Version:          version,
+		Config:           config,
+		DisplayWrapper:   display.NewWrapper(config, state, logger, pauseChannel, version),
+		State:            state,
+		LogChannel:       logChannel,
+		DB:               database,
+		ConsensusStore:   consensusStore,
+		DataFetcher:      fetcher.NewDataFetcher(config, state, logger),
+		mbRPCURLs:        butils.NewMailbox[string](1000),
+		rpcURLsLastFetch: make(map[string]time.Time),
+		PauseChannel:     pauseChannel,
+		IsPaused:         false,
+		cleanupFuncs:     make([]func(), 0),
 	}
 }
 
 func (a *App) Start() {
+	// Check if analytics mode is enabled
+	if a.Config.AnalyticsMode {
+		a.runAnalyticsMode()
+		return
+	}
+
 	// Set up terminal cleanup on exit
 	defer a.restoreTerminal()
 
@@ -140,8 +144,7 @@ func (a *App) Start() {
 	go a.CrawlRPCURLs()
 
 	go a.GoRefreshConsensus()
-	go a.GoRefreshValidators()
-	go a.GoRefreshChainInfo()
+	go a.GoRefreshCometNodeInfo()
 	go a.GoRefreshUpgrade()
 	go a.GoRefreshBlockTime()
 	go a.GoRefreshNetInfo()
@@ -151,7 +154,7 @@ func (a *App) Start() {
 
 	// Start database cleanup routine if database is enabled
 	if a.DB != nil && a.ConsensusStore != nil {
-		go a.DatabaseCleanupRoutine()
+		go a.databaseCleanupRoutine()
 	}
 
 	a.DisplayWrapper.Start()
@@ -176,12 +179,11 @@ func (a *App) CrawlRPCURLs() {
 		case <-a.mbRPCURLs.Notify():
 			var wg sync.WaitGroup
 			for _, url := range a.mbRPCURLs.RetrieveAll() {
-				if lastFetch, ok := a.rpcURLsLastFetch[url]; ok && time.Now().Sub(lastFetch) < 15*time.Second {
+				if lastFetch, ok := a.rpcURLsLastFetch[url]; ok && time.Since(lastFetch) < 15*time.Second {
 					continue
 				}
 				a.rpcURLsLastFetch[url] = time.Now()
 
-				url := url
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
@@ -197,20 +199,19 @@ func (a *App) CrawlRPCURLs() {
 				}
 			}
 		}
-
 	}
 }
 
 func (a *App) fetchRPCInfo(rpcURL string) {
 	netInfo, err := a.DataFetcher.GetNetInfo(rpcURL)
 	if err != nil {
-		a.LogChannel <- fmt.Sprintf("error getting /net_info from %s: %v", rpcURL, err)
+		a.Logger.Error().Err(err).Msg(fmt.Sprintf("error getting /net_info from %s", rpcURL))
 		return
 	}
 
-	status, err := a.TendermintClient.GetStatus(rpcURL)
+	status, err := a.DataFetcher.GetCometNodeStatus(rpcURL)
 	if err != nil {
-		a.LogChannel <- fmt.Sprintf("error getting /status from %s: %v", rpcURL, err)
+		a.Logger.Error().Err(err).Msg(fmt.Sprintf("error getting /status from %s", rpcURL))
 		return
 	}
 
@@ -218,23 +219,21 @@ func (a *App) fetchRPCInfo(rpcURL string) {
 	if known, ok := a.State.KnownRPCByURL(rpcURL); ok {
 		rpc = known
 	}
-	rpc.ID = status.Result.NodeInfo.ID
+	rpc.ID = string(status.NodeInfo.ID())
 	rpc.URL = rpcURL
-	rpc.Moniker = status.Result.NodeInfo.Moniker
-	rpc.ValidatorAddress = status.Result.ValidatorInfo.Address
+	rpc.Moniker = status.NodeInfo.Moniker
+	rpc.ValidatorAddress = status.ValidatorInfo.Address.String()
 
-	if status.Result.ValidatorInfo.Address != "" && a.State.ChainValidators != nil {
-		for _, cv := range *a.State.ChainValidators {
-			if strings.ToLower(cv.Address) == strings.ToLower(rpc.ValidatorAddress) {
-				rpc.ValidatorMoniker = cv.Moniker
-				break
-			}
+	for _, cv := range a.State.TMValidators {
+		if strings.EqualFold(cv.CosmosValidator.ConsensusPubkey.Address().String(), rpc.ValidatorAddress) {
+			rpc.ValidatorMoniker = cv.CosmosValidator.Moniker
+			break
 		}
 	}
 
 	a.State.AddKnownRPC(rpc)
-
 	a.State.AddRPCPeers(rpcURL, netInfo.Peers)
+
 	for _, peer := range netInfo.Peers {
 		var peerRPC types.RPC
 		if known, ok := a.State.KnownRPCByURL(peer.URL()); ok {
@@ -274,73 +273,55 @@ func (a *App) RefreshConsensus() {
 	}
 
 	var wg sync.WaitGroup
-	var consensusError error
-	var validatorsError error
-	var validators []types.TendermintValidator
-	var consensus *types.ConsensusStateResponse
+	var consensus *cnstypes.RoundState
+	var vals []types.TMValidator
+	var consErr error
+	var valsErr error
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		consensus, consensusError = a.TendermintClient.GetConsensusState()
+		consensus, consErr = a.DataFetcher.GetConsensusState()
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		validators, validatorsError = a.TendermintClient.GetValidators()
+		vals, valsErr = a.DataFetcher.GetValidators()
 	}()
 
 	wg.Wait()
 
-	if consensusError != nil {
-		a.Logger.Error().Err(consensusError).Msg("Could not fetch consensus data")
-		a.State.SetConsensusStateError(consensusError)
+	if consErr != nil {
+		a.Logger.Error().Err(consErr).Msg("Could not fetch consensus data")
+		a.State.SetConsensusStateError(consErr)
 		a.DisplayWrapper.SetState(a.State)
 		return
 	}
 
-	if validatorsError != nil {
-		a.Logger.Error().Err(validatorsError).Msg("Could not fetch validators")
-		a.State.SetConsensusStateError(validatorsError)
+	if valsErr != nil {
+		a.Logger.Error().Err(valsErr).Msg("Could not fetch validators")
+		a.State.SetConsensusStateError(valsErr)
 		a.DisplayWrapper.SetState(a.State)
 		return
 	}
 
-	// Convert TendermintValidator data to TMValidators
-	tmValidators := a.convertToTMValidators(validators, consensus)
-	a.State.SetTMValidators(tmValidators)
+	a.State.SetTMValidators(vals)
 	a.State.SetConsensusStateError(nil)
 
 	// Persist to database if available
-	if a.ConsensusStore != nil && consensus != nil && consensus.Result != nil && consensus.Result.RoundState != nil {
+	if a.ConsensusStore != nil && consensus != nil {
 		ctx := context.Background()
 
-		// Parse height/round/step from consensus (format: "height/round/step")
-		heightRoundStep := consensus.Result.RoundState.HeightRoundStep
-		parts := strings.Split(heightRoundStep, "/")
-		if len(parts) >= 3 {
-			if height, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
-				if round, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-					if step, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
-						// Update state height/round from consensus
-						a.State.Height = height
-						a.State.Round = round
-						a.State.Step = step
+		// Store validators and height information
+		if err := a.ConsensusStore.StoreValidators(ctx, consensus.Height, vals); err != nil {
+			a.Logger.Error().Err(err).Int64("height", consensus.Height).Msg("Failed to persist validators to database")
+		}
 
-						// Store validators and height information
-						if err := a.ConsensusStore.StoreValidators(ctx, height, tmValidators); err != nil {
-							a.Logger.Error().Err(err).Int64("height", height).Msg("Failed to persist validators to database")
-						}
-
-						// Store round data from current state
-						for hr, roundData := range a.State.VotesByRound.Iter() {
-							if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, tmValidators); err != nil {
-								a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
-							}
-						}
-					}
-				}
+		// Store round data from current state
+		for hr, roundData := range a.State.VotesByRound.Iter() {
+			if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, vals); err != nil {
+				a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
 			}
 		}
 	}
@@ -348,44 +329,10 @@ func (a *App) RefreshConsensus() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshValidators() {
+func (a *App) GoRefreshCometNodeInfo() {
 	defer a.HandlePanic()
 
-	a.RefreshValidators()
-
-	ticker := time.NewTicker(a.Config.ValidatorsRefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshValidators()
-		}
-	}
-}
-
-func (a *App) RefreshValidators() {
-	if a.IsPaused {
-		return
-	}
-
-	chainValidators, err := a.DataFetcher.GetValidators()
-	if err != nil {
-		a.DisplayWrapper.SetState(a.State)
-		a.Logger.Error().Err(err).Msg("Error getting chain validators")
-		return
-	}
-
-	a.State.SetChainValidators(chainValidators)
-	a.DisplayWrapper.SetState(a.State)
-}
-
-func (a *App) GoRefreshChainInfo() {
-	defer a.HandlePanic()
-
-	a.RefreshChainInfo()
+	a.RefreshCometNodeInfo()
 
 	ticker := time.NewTicker(a.Config.ChainInfoRefreshRate)
 	done := make(chan bool)
@@ -395,17 +342,17 @@ func (a *App) GoRefreshChainInfo() {
 		case <-done:
 			return
 		case <-ticker.C:
-			a.RefreshChainInfo()
+			a.RefreshCometNodeInfo()
 		}
 	}
 }
 
-func (a *App) RefreshChainInfo() {
+func (a *App) RefreshCometNodeInfo() {
 	if a.IsPaused {
 		return
 	}
 
-	chainInfo, err := a.TendermintClient.GetStatus(a.State.CurrentRPC().URL)
+	nodeStatus, err := a.DataFetcher.GetCometNodeStatus(a.State.CurrentRPC().URL)
 	if err != nil {
 		a.Logger.Error().Err(err).Msg("Error getting chain info")
 		a.State.SetChainInfoError(err)
@@ -413,7 +360,7 @@ func (a *App) RefreshChainInfo() {
 		return
 	}
 
-	a.State.SetChainInfo(&chainInfo.Result)
+	a.State.SetChainInfo(nodeStatus)
 	a.State.SetChainInfoError(err)
 	a.DisplayWrapper.SetState(a.State)
 }
@@ -488,7 +435,7 @@ func (a *App) RefreshBlockTime() {
 		return
 	}
 
-	blockTime, err := a.TendermintClient.GetBlockTime()
+	blockTime, err := a.DataFetcher.GetBlockTime()
 	if err != nil {
 		a.Logger.Error().Err(err).Msg("Error getting block time")
 		return
@@ -537,8 +484,8 @@ func (a *App) SubscribeCometBFT() {
 	fmt.Println("connecting to websocket...")
 
 	mbEvents := butils.NewMailbox[ctypes.TMEventData](1000)
-	a.CometRPCWebsocket.Subscribe(mbEvents, "Vote")
-	a.CometRPCWebsocket.Subscribe(mbEvents, "NewRound")
+	a.DataFetcher.Subscribe(mbEvents, "Vote")
+	a.DataFetcher.Subscribe(mbEvents, "NewRound")
 
 	for {
 		select {
@@ -581,7 +528,7 @@ func (a *App) HandlePanic() {
 	}
 }
 
-// shutdown performs graceful shutdown with terminal cleanup
+// shutdown performs graceful shutdown with terminal cleanup.
 func (a *App) shutdown() {
 	// Stop the tview application first
 	if a.DisplayWrapper != nil && a.DisplayWrapper.App != nil {
@@ -592,7 +539,7 @@ func (a *App) shutdown() {
 	a.restoreTerminal()
 }
 
-// restoreTerminal restores terminal state and cleans up
+// restoreTerminal restores terminal state and cleans up.
 func (a *App) restoreTerminal() {
 	// Get the default screen to ensure proper cleanup
 	screen, err := tcell.NewScreen()
@@ -620,97 +567,13 @@ func (a *App) restoreTerminal() {
 	}
 }
 
-// addCleanupFunc registers a function to be called during shutdown
+// addCleanupFunc registers a function to be called during shutdown.
 func (a *App) addCleanupFunc(fn func()) {
 	a.cleanupFuncs = append(a.cleanupFuncs, fn)
 }
 
-// convertToTMValidators converts TendermintValidator slice to TMValidators
-func (a *App) convertToTMValidators(validators []types.TendermintValidator, consensus *types.ConsensusStateResponse) types.TMValidators {
-	tmValidators := make(types.TMValidators, 0, len(validators))
-
-	// Calculate total voting power first
-	totalVotingPower := int64(0)
-	for _, validator := range validators {
-		votingPower, err := strconv.ParseInt(validator.VotingPower, 10, 64)
-		if err != nil {
-			a.Logger.Error().Err(err).Str("address", validator.Address).Msg("Failed to parse voting power")
-			continue
-		}
-		totalVotingPower += votingPower
-	}
-
-	for i, validator := range validators {
-		// Convert TendermintValidator to CometBFT Validator
-		cometValidator, err := a.convertToCometBFTValidator(validator)
-		if err != nil {
-			a.Logger.Error().Err(err).Str("address", validator.Address).Msg("Failed to convert validator")
-			continue
-		}
-
-		// Calculate voting power percentage
-		votingPowerPercent := big.NewFloat(0)
-		if totalVotingPower > 0 {
-			validatorPower := big.NewFloat(float64(cometValidator.VotingPower))
-			total := big.NewFloat(float64(totalVotingPower))
-			votingPowerPercent.Quo(validatorPower, total)
-			votingPowerPercent.Mul(votingPowerPercent, big.NewFloat(100))
-		}
-
-		tmValidator := types.TMValidator{
-			Validator:          *cometValidator,
-			Index:              i,
-			VotingPowerPercent: votingPowerPercent,
-		}
-
-		// Add chain validator info if available
-		if a.State.ChainValidators != nil {
-			for _, cv := range *a.State.ChainValidators {
-				if cv.Address == validator.Address {
-					tmValidator.ChainValidator = &cv
-					break
-				}
-			}
-		}
-
-		tmValidators = append(tmValidators, tmValidator)
-	}
-
-	return tmValidators
-}
-
-// convertToCometBFTValidator converts a TendermintValidator to CometBFT Validator
-func (a *App) convertToCometBFTValidator(validator types.TendermintValidator) (*ctypes.Validator, error) {
-	// Parse voting power
-	votingPower, err := strconv.ParseInt(validator.VotingPower, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid voting power %s: %w", validator.VotingPower, err)
-	}
-
-	// Parse public key - for now, create a simple ed25519 key
-	// This is a simplified approach since we primarily need the address and voting power for display
-	pubKeyBytes, err := utils.Base64ToBytes(validator.PubKey.PubKeyBase64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid public key %s: %w", validator.PubKey.PubKeyBase64, err)
-	}
-
-	// Create ed25519 public key (most common type)
-	var pubKey crypto.PubKey
-	if len(pubKeyBytes) == 32 { // ed25519 key length
-		pubKey = ed25519.PubKey(pubKeyBytes)
-	} else {
-		// Fallback: create a minimal implementation that just handles address generation
-		return nil, fmt.Errorf("unsupported public key type or length: %d", len(pubKeyBytes))
-	}
-
-	// Create CometBFT validator using the constructor
-	cometValidator := ctypes.NewValidator(pubKey, votingPower)
-
-	return cometValidator, nil
-}
-
-// DatabaseCleanupRoutine runs periodic database cleanup
-func (a *App) DatabaseCleanupRoutine() {
+// databaseCleanupRoutine runs periodic database cleanup.
+func (a *App) databaseCleanupRoutine() {
 	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
 	defer ticker.Stop()
 
@@ -737,5 +600,84 @@ func (a *App) DatabaseCleanupRoutine() {
 				a.Logger.Debug().Msg("Database cleanup completed successfully")
 			}
 		}
+	}
+}
+
+// runAnalyticsMode runs the application in analytics mode.
+func (a *App) runAnalyticsMode() {
+	if a.DB == nil {
+		fmt.Printf("Error: Analytics mode requires database to be enabled. Use --database-path flag.\n")
+		os.Exit(1)
+	}
+
+	cliAnalytics := analytics.NewCLIAnalytics(a.DB, a.Logger)
+	ctx := context.Background()
+
+	switch a.Config.AnalyticsCommand {
+	case "performance":
+		if a.Config.AnalyticsValidator == "" {
+			fmt.Printf("Error: --analytics-validator is required for performance analysis\n")
+			os.Exit(1)
+		}
+
+		err := cliAnalytics.PrintValidatorPerformance(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
+		if err != nil {
+			fmt.Printf("Error running performance analysis: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "rankings":
+		err := cliAnalytics.PrintValidatorRankings(ctx, a.Config.AnalyticsTimeWindow, 20)
+		if err != nil {
+			fmt.Printf("Error running rankings analysis: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "timeseries":
+		if a.Config.AnalyticsValidator == "" {
+			fmt.Printf("Error: --analytics-validator is required for time series analysis\n")
+			os.Exit(1)
+		}
+
+		err := cliAnalytics.PrintPerformanceTimeSeries(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
+		if err != nil {
+			fmt.Printf("Error running time series analysis: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "debug":
+		err := cliAnalytics.PrintDatabaseSummary(ctx)
+		if err != nil {
+			fmt.Printf("Error running database debug: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "diagnose":
+		if a.Config.AnalyticsValidator == "" {
+			fmt.Printf("Error: --analytics-validator is required for validator diagnosis\n")
+			os.Exit(1)
+		}
+
+		err := cliAnalytics.DiagnoseValidator(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
+		if err != nil {
+			fmt.Printf("Error running validator diagnosis: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "search":
+		if a.Config.AnalyticsValidator == "" {
+			fmt.Printf("Error: --analytics-validator is required as search term for validator search\n")
+			os.Exit(1)
+		}
+
+		err := cliAnalytics.SearchValidators(ctx, a.Config.AnalyticsValidator)
+		if err != nil {
+			fmt.Printf("Error running validator search: %v\n", err)
+			os.Exit(1)
+		}
+
+	default:
+		fmt.Printf("Error: Unknown analytics command '%s'. Available commands: performance, rankings, timeseries, debug, diagnose, search\n", a.Config.AnalyticsCommand)
+		os.Exit(1)
 	}
 }

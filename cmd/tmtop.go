@@ -2,20 +2,19 @@ package main
 
 import (
 	"fmt"
-	"main/pkg"
-	configPkg "main/pkg/config"
-	"main/pkg/logger"
 	"os"
 	"path/filepath"
 	"time"
+
+	"main/pkg"
+	configPkg "main/pkg/config"
+	"main/pkg/logger"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var (
-	version = "unknown"
-)
+var version = "unknown"
 
 func Execute(inputConfig configPkg.InputConfig, args []string, configFile string) {
 	// Load configuration from file if specified
@@ -39,7 +38,7 @@ func Execute(inputConfig configPkg.InputConfig, args []string, configFile string
 	app.Start()
 }
 
-// loadConfigFile loads configuration from file using viper
+// loadConfigFile loads configuration from file using viper.
 func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	fmt.Println("Loading config file:", configFile)
 
@@ -205,6 +204,12 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&config.DatabasePath, "database-path", "", "Path to SQLite database file (default: ~/.config/tmtop/tmtop.db)")
 	rootCmd.PersistentFlags().Int64Var(&config.MaxRetainBlocks, "max-retain-blocks", 10000, "Maximum number of blocks to retain in database")
 	rootCmd.PersistentFlags().IntVar(&config.MaxRetainDays, "max-retain-days", 7, "Maximum number of days to retain data (alternative to max-retain-blocks)")
+
+	// Analytics flags
+	rootCmd.PersistentFlags().BoolVar(&config.AnalyticsMode, "analytics", false, "Enable analytics mode (requires database)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsValidator, "analytics-validator", "", "Validator address for analytics (required in analytics mode)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsTimeWindow, "analytics-time-window", "24h", "Time window for analytics (Go duration: 30m, 1h, 24h, 168h, etc.)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsCommand, "analytics-command", "performance", "Analytics command to run (performance, rankings, timeseries, debug, diagnose, search)")
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.GetDefaultLogger().Fatal().Err(err).Msg("Could not start application")

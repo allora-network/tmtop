@@ -16,13 +16,13 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// ConsensusStore handles persistence of consensus data
+// ConsensusStore handles persistence of consensus data.
 type ConsensusStore struct {
 	db     *DB
 	logger zerolog.Logger
 }
 
-// NewConsensusStore creates a new consensus store
+// NewConsensusStore creates a new consensus store.
 func NewConsensusStore(db *DB, logger zerolog.Logger) *ConsensusStore {
 	return &ConsensusStore{
 		db:     db,
@@ -30,8 +30,14 @@ func NewConsensusStore(db *DB, logger zerolog.Logger) *ConsensusStore {
 	}
 }
 
-// StoreRoundData persists round data from RoundDataMap
-func (cs *ConsensusStore) StoreRoundData(ctx context.Context, height int64, round int32, roundData *types.RoundData, validators types.TMValidators) error {
+// StoreRoundData persists round data from RoundDataMap.
+func (cs *ConsensusStore) StoreRoundData(
+	ctx context.Context,
+	height int64,
+	round int32,
+	roundData *types.RoundData,
+	validators types.TMValidators,
+) error {
 	return cs.db.WithTx(ctx, func(q *sqlc.Queries) error {
 		// Store the round
 		roundParams := sqlc.UpsertRoundParams{
@@ -65,11 +71,11 @@ func (cs *ConsensusStore) StoreRoundData(ctx context.Context, height int64, roun
 		for validatorAddr, voteMap := range roundData.Votes {
 			for voteType, blockID := range voteMap {
 				voteParams := sqlc.UpsertVoteParams{
-					Height:           height,
-					RoundNumber:      int64(round),
-					ValidatorAddress: validatorAddr,
-					VoteType:         int64(voteType),
-					Signature:        sql.NullString{}, // We can add signature tracking later
+					Height:              height,
+					RoundNumber:         int64(round),
+					ValidatorHexAddress: validatorAddr,
+					VoteType:            int64(voteType),
+					Signature:           sql.NullString{}, // We can add signature tracking later
 					Timestamp: sql.NullTime{
 						Time:  time.Now(),
 						Valid: true,
@@ -100,16 +106,16 @@ func (cs *ConsensusStore) StoreRoundData(ctx context.Context, height int64, roun
 	})
 }
 
-// StoreValidators persists validator information and creates snapshots for a height
+// StoreValidators persists validator information and creates snapshots for a height.
 func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, validators types.TMValidators) error {
 	return cs.db.WithTx(ctx, func(q *sqlc.Queries) error {
 		// Store height record first
 		heightParams := sqlc.UpsertHeightParams{
-			Height:           height,
-			BlockHash:        sql.NullString{}, // Can be added later
-			BlockTime:        sql.NullTime{},   // Can be added later
-			ProposerAddress:  sql.NullString{}, // Can be added later
-			TotalValidators:  sql.NullInt64{Int64: int64(len(validators)), Valid: true},
+			Height:          height,
+			BlockHash:       sql.NullString{}, // Can be added later
+			BlockTime:       sql.NullTime{},   // Can be added later
+			ProposerAddress: sql.NullString{}, // Can be added later
+			TotalValidators: sql.NullInt64{Int64: int64(len(validators)), Valid: true},
 		}
 
 		if _, err := q.UpsertHeight(ctx, heightParams); err != nil {
@@ -118,12 +124,19 @@ func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, val
 
 		// Store validators and their snapshots
 		for _, validator := range validators {
+			// Determine operator address - use ChainValidator.Address if available, otherwise use hex address
+			operatorAddress := validator.GetDisplayAddress() // Default to hex address
+			if validator.ChainValidator != nil && validator.ChainValidator.Address != "" {
+				operatorAddress = validator.ChainValidator.Address
+			}
+
 			// Upsert validator
 			validatorParams := sqlc.UpsertValidatorParams{
-				Address:     validator.GetDisplayAddress(),
-				PublicKey:   hex.EncodeToString(validator.PubKey.Bytes()),
-				VotingPower: validator.VotingPower,
-				Moniker:     sql.NullString{},
+				OperatorAddress: operatorAddress,
+				HexAddress:      validator.GetDisplayAddress(),
+				PublicKey:       hex.EncodeToString(validator.PubKey.Bytes()),
+				VotingPower:     validator.VotingPower,
+				Moniker:         sql.NullString{},
 			}
 
 			// Add moniker if available
@@ -151,7 +164,7 @@ func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, val
 
 			snapshotParams := sqlc.UpsertValidatorSnapshotParams{
 				Height:              height,
-				ValidatorAddress:    validator.GetDisplayAddress(),
+				ValidatorHexAddress: validator.GetDisplayAddress(),
 				VotingPower:         validator.VotingPower,
 				VotingPowerPercent:  sql.NullFloat64{Float64: votingPowerPercent, Valid: true},
 				IsProposer:          sql.NullBool{}, // Will be set when we know the proposer
@@ -169,7 +182,7 @@ func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, val
 	})
 }
 
-// StoreConsensusEvent records a consensus milestone event
+// StoreConsensusEvent records a consensus milestone event.
 func (cs *ConsensusStore) StoreConsensusEvent(ctx context.Context, height int64, round int32, eventType string, eventData interface{}) error {
 	var eventDataJSON sql.NullString
 
@@ -198,7 +211,7 @@ func (cs *ConsensusStore) StoreConsensusEvent(ctx context.Context, height int64,
 	return nil
 }
 
-// StoreCometBFTEvents processes and stores CometBFT events
+// StoreCometBFTEvents processes and stores CometBFT events.
 func (cs *ConsensusStore) StoreCometBFTEvents(ctx context.Context, events []ctypes.TMEventData, validators types.TMValidators) error {
 	for _, event := range events {
 		switch x := event.(type) {
@@ -234,19 +247,19 @@ func (cs *ConsensusStore) StoreCometBFTEvents(ctx context.Context, events []ctyp
 	return nil
 }
 
-// updateProposerInSnapshots updates the is_proposer flag for validator snapshots
+// updateProposerInSnapshots updates the is_proposer flag for validator snapshots.
 func (cs *ConsensusStore) updateProposerInSnapshots(ctx context.Context, height int64, proposerAddr string) error {
 	// First, clear any existing proposer flags for this height
-	_, err := cs.db.db.ExecContext(ctx, 
-		"UPDATE validator_snapshots SET is_proposer = FALSE WHERE height = ?", 
+	_, err := cs.db.db.ExecContext(ctx,
+		"UPDATE validator_snapshots SET is_proposer = FALSE WHERE height = ?",
 		height)
 	if err != nil {
 		return fmt.Errorf("failed to clear proposer flags: %w", err)
 	}
 
 	// Then set the current proposer
-	_, err = cs.db.db.ExecContext(ctx, 
-		"UPDATE validator_snapshots SET is_proposer = TRUE WHERE height = ? AND validator_address = ?", 
+	_, err = cs.db.db.ExecContext(ctx,
+		"UPDATE validator_snapshots SET is_proposer = TRUE WHERE height = ? AND validator_hex_address = ?",
 		height, proposerAddr)
 	if err != nil {
 		return fmt.Errorf("failed to set proposer flag: %w", err)
@@ -255,7 +268,7 @@ func (cs *ConsensusStore) updateProposerInSnapshots(ctx context.Context, height 
 	return nil
 }
 
-// LoadRoundDataMap loads historical round data from the database
+// LoadRoundDataMap loads historical round data from the database.
 func (cs *ConsensusStore) LoadRoundDataMap(ctx context.Context, fromHeight, toHeight int64) (*types.RoundDataMap, error) {
 	roundDataMap := types.NewRoundDataMap()
 
@@ -297,7 +310,7 @@ func (cs *ConsensusStore) LoadRoundDataMap(ctx context.Context, fromHeight, toHe
 				}
 			}
 
-			roundDataMap.AddVote(height, roundNum, vote.ValidatorAddress, 
+			roundDataMap.AddVote(height, roundNum, vote.ValidatorHexAddress,
 				cptypes.SignedMsgType(vote.VoteType), blockID)
 		}
 	}
@@ -305,12 +318,12 @@ func (cs *ConsensusStore) LoadRoundDataMap(ctx context.Context, fromHeight, toHe
 	return roundDataMap, nil
 }
 
-// GetRecentRounds returns recent round data for display
+// GetRecentRounds returns recent round data for display.
 func (cs *ConsensusStore) GetRecentRounds(ctx context.Context, limit int32) ([]sqlc.Round, error) {
 	return cs.db.queries.GetRecentRounds(ctx, int64(limit))
 }
 
-// GetValidatorsForHeight returns validator snapshots for a specific height
+// GetValidatorsForHeight returns validator snapshots for a specific height.
 func (cs *ConsensusStore) GetValidatorsForHeight(ctx context.Context, height int64) ([]sqlc.GetValidatorsByHeightRow, error) {
 	return cs.db.queries.GetValidatorsByHeight(ctx, height)
 }

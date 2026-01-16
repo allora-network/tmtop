@@ -11,22 +11,22 @@ import (
 )
 
 const batchCreateValidatorSnapshots = `-- name: BatchCreateValidatorSnapshots :exec
-INSERT INTO validator_snapshots (height, validator_address, voting_power, voting_power_percent, is_proposer)
+INSERT INTO validator_snapshots (height, validator_hex_address, voting_power, voting_power_percent, is_proposer)
 VALUES (?, ?, ?, ?, ?)
 `
 
 type BatchCreateValidatorSnapshotsParams struct {
-	Height             int64           `json:"height"`
-	ValidatorAddress   string          `json:"validator_address"`
-	VotingPower        int64           `json:"voting_power"`
-	VotingPowerPercent sql.NullFloat64 `json:"voting_power_percent"`
-	IsProposer         sql.NullBool    `json:"is_proposer"`
+	Height              int64           `json:"height"`
+	ValidatorHexAddress string          `json:"validator_hex_address"`
+	VotingPower         int64           `json:"voting_power"`
+	VotingPowerPercent  sql.NullFloat64 `json:"voting_power_percent"`
+	IsProposer          sql.NullBool    `json:"is_proposer"`
 }
 
 func (q *Queries) BatchCreateValidatorSnapshots(ctx context.Context, arg BatchCreateValidatorSnapshotsParams) error {
 	_, err := q.exec(ctx, q.batchCreateValidatorSnapshotsStmt, batchCreateValidatorSnapshots,
 		arg.Height,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VotingPower,
 		arg.VotingPowerPercent,
 		arg.IsProposer,
@@ -35,23 +35,23 @@ func (q *Queries) BatchCreateValidatorSnapshots(ctx context.Context, arg BatchCr
 }
 
 const createValidatorSnapshot = `-- name: CreateValidatorSnapshot :one
-INSERT INTO validator_snapshots (height, validator_address, voting_power, voting_power_percent, is_proposer)
+INSERT INTO validator_snapshots (height, validator_hex_address, voting_power, voting_power_percent, is_proposer)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, height, validator_address, voting_power, voting_power_percent, is_proposer, created_at
+RETURNING id, height, validator_hex_address, voting_power, voting_power_percent, is_proposer, created_at
 `
 
 type CreateValidatorSnapshotParams struct {
-	Height             int64           `json:"height"`
-	ValidatorAddress   string          `json:"validator_address"`
-	VotingPower        int64           `json:"voting_power"`
-	VotingPowerPercent sql.NullFloat64 `json:"voting_power_percent"`
-	IsProposer         sql.NullBool    `json:"is_proposer"`
+	Height              int64           `json:"height"`
+	ValidatorHexAddress string          `json:"validator_hex_address"`
+	VotingPower         int64           `json:"voting_power"`
+	VotingPowerPercent  sql.NullFloat64 `json:"voting_power_percent"`
+	IsProposer          sql.NullBool    `json:"is_proposer"`
 }
 
 func (q *Queries) CreateValidatorSnapshot(ctx context.Context, arg CreateValidatorSnapshotParams) (ValidatorSnapshot, error) {
 	row := q.queryRow(ctx, q.createValidatorSnapshotStmt, createValidatorSnapshot,
 		arg.Height,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VotingPower,
 		arg.VotingPowerPercent,
 		arg.IsProposer,
@@ -60,7 +60,7 @@ func (q *Queries) CreateValidatorSnapshot(ctx context.Context, arg CreateValidat
 	err := row.Scan(
 		&i.ID,
 		&i.Height,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VotingPower,
 		&i.VotingPowerPercent,
 		&i.IsProposer,
@@ -79,23 +79,23 @@ func (q *Queries) DeleteValidatorSnapshotsOlderThan(ctx context.Context, height 
 }
 
 const getValidatorSnapshot = `-- name: GetValidatorSnapshot :one
-SELECT id, height, validator_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
-WHERE height = ? AND validator_address = ? 
+SELECT id, height, validator_hex_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
+WHERE height = ? AND validator_hex_address = ?
 LIMIT 1
 `
 
 type GetValidatorSnapshotParams struct {
-	Height           int64  `json:"height"`
-	ValidatorAddress string `json:"validator_address"`
+	Height              int64  `json:"height"`
+	ValidatorHexAddress string `json:"validator_hex_address"`
 }
 
 func (q *Queries) GetValidatorSnapshot(ctx context.Context, arg GetValidatorSnapshotParams) (ValidatorSnapshot, error) {
-	row := q.queryRow(ctx, q.getValidatorSnapshotStmt, getValidatorSnapshot, arg.Height, arg.ValidatorAddress)
+	row := q.queryRow(ctx, q.getValidatorSnapshotStmt, getValidatorSnapshot, arg.Height, arg.ValidatorHexAddress)
 	var i ValidatorSnapshot
 	err := row.Scan(
 		&i.ID,
 		&i.Height,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VotingPower,
 		&i.VotingPowerPercent,
 		&i.IsProposer,
@@ -105,7 +105,7 @@ func (q *Queries) GetValidatorSnapshot(ctx context.Context, arg GetValidatorSnap
 }
 
 const getValidatorSnapshotsForHeight = `-- name: GetValidatorSnapshotsForHeight :many
-SELECT id, height, validator_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
+SELECT id, height, validator_hex_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
 WHERE height = ?
 ORDER BY voting_power DESC
 `
@@ -122,7 +122,7 @@ func (q *Queries) GetValidatorSnapshotsForHeight(ctx context.Context, height int
 		if err := rows.Scan(
 			&i.ID,
 			&i.Height,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VotingPower,
 			&i.VotingPowerPercent,
 			&i.IsProposer,
@@ -142,18 +142,18 @@ func (q *Queries) GetValidatorSnapshotsForHeight(ctx context.Context, height int
 }
 
 const getValidatorSnapshotsForValidator = `-- name: GetValidatorSnapshotsForValidator :many
-SELECT id, height, validator_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
-WHERE validator_address = ? AND height >= ?
+SELECT id, height, validator_hex_address, voting_power, voting_power_percent, is_proposer, created_at FROM validator_snapshots 
+WHERE validator_hex_address = ? AND height >= ?
 ORDER BY height DESC
 `
 
 type GetValidatorSnapshotsForValidatorParams struct {
-	ValidatorAddress string `json:"validator_address"`
-	Height           int64  `json:"height"`
+	ValidatorHexAddress string `json:"validator_hex_address"`
+	Height              int64  `json:"height"`
 }
 
 func (q *Queries) GetValidatorSnapshotsForValidator(ctx context.Context, arg GetValidatorSnapshotsForValidatorParams) ([]ValidatorSnapshot, error) {
-	rows, err := q.query(ctx, q.getValidatorSnapshotsForValidatorStmt, getValidatorSnapshotsForValidator, arg.ValidatorAddress, arg.Height)
+	rows, err := q.query(ctx, q.getValidatorSnapshotsForValidatorStmt, getValidatorSnapshotsForValidator, arg.ValidatorHexAddress, arg.Height)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (q *Queries) GetValidatorSnapshotsForValidator(ctx context.Context, arg Get
 		if err := rows.Scan(
 			&i.ID,
 			&i.Height,
-			&i.ValidatorAddress,
+			&i.ValidatorHexAddress,
 			&i.VotingPower,
 			&i.VotingPowerPercent,
 			&i.IsProposer,
@@ -184,27 +184,27 @@ func (q *Queries) GetValidatorSnapshotsForValidator(ctx context.Context, arg Get
 }
 
 const upsertValidatorSnapshot = `-- name: UpsertValidatorSnapshot :one
-INSERT INTO validator_snapshots (height, validator_address, voting_power, voting_power_percent, is_proposer)
+INSERT INTO validator_snapshots (height, validator_hex_address, voting_power, voting_power_percent, is_proposer)
 VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(height, validator_address) DO UPDATE SET
+ON CONFLICT(height, validator_hex_address) DO UPDATE SET
     voting_power = excluded.voting_power,
     voting_power_percent = excluded.voting_power_percent,
     is_proposer = excluded.is_proposer
-RETURNING id, height, validator_address, voting_power, voting_power_percent, is_proposer, created_at
+RETURNING id, height, validator_hex_address, voting_power, voting_power_percent, is_proposer, created_at
 `
 
 type UpsertValidatorSnapshotParams struct {
-	Height             int64           `json:"height"`
-	ValidatorAddress   string          `json:"validator_address"`
-	VotingPower        int64           `json:"voting_power"`
-	VotingPowerPercent sql.NullFloat64 `json:"voting_power_percent"`
-	IsProposer         sql.NullBool    `json:"is_proposer"`
+	Height              int64           `json:"height"`
+	ValidatorHexAddress string          `json:"validator_hex_address"`
+	VotingPower         int64           `json:"voting_power"`
+	VotingPowerPercent  sql.NullFloat64 `json:"voting_power_percent"`
+	IsProposer          sql.NullBool    `json:"is_proposer"`
 }
 
 func (q *Queries) UpsertValidatorSnapshot(ctx context.Context, arg UpsertValidatorSnapshotParams) (ValidatorSnapshot, error) {
 	row := q.queryRow(ctx, q.upsertValidatorSnapshotStmt, upsertValidatorSnapshot,
 		arg.Height,
-		arg.ValidatorAddress,
+		arg.ValidatorHexAddress,
 		arg.VotingPower,
 		arg.VotingPowerPercent,
 		arg.IsProposer,
@@ -213,7 +213,7 @@ func (q *Queries) UpsertValidatorSnapshot(ctx context.Context, arg UpsertValidat
 	err := row.Scan(
 		&i.ID,
 		&i.Height,
-		&i.ValidatorAddress,
+		&i.ValidatorHexAddress,
 		&i.VotingPower,
 		&i.VotingPowerPercent,
 		&i.IsProposer,

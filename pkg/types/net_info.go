@@ -113,7 +113,7 @@ func (nd *NanoDuration) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// String returns the string representation of the duration
+// String returns the string representation of the duration.
 func (nd NanoDuration) String() string {
 	return time.Duration(nd).String()
 }
@@ -122,7 +122,7 @@ type CustomTime struct {
 	time.Time
 }
 
-// UnmarshalJSON implements the json.Unmarshaler interface
+// UnmarshalJSON implements the json.Unmarshaler interface.
 func (ct *CustomTime) UnmarshalJSON(b []byte) error {
 	// Remove quotes
 	s := string(b)

@@ -2,19 +2,19 @@ package types
 
 import "time"
 
-type TendermintBlockResponse struct {
-	Result TendermintBlockResult `json:"result"`
+type CometBlockResponse struct {
+	Result CometBlockResult `json:"result"`
 }
 
-type TendermintBlockResult struct {
-	Block *TendermintBlock `json:"block"`
+type CometBlockResult struct {
+	Block *CometBlock `json:"block"`
 }
 
-type TendermintBlock struct {
-	Header TendermintBlockHeader `json:"header"`
+type CometBlock struct {
+	Header CometBlockHeader `json:"header"`
 }
 
-type TendermintBlockHeader struct {
+type CometBlockHeader struct {
 	Height string    `json:"height"`
 	Time   time.Time `json:"time"`
 }

@@ -11,21 +11,23 @@ import (
 )
 
 const createValidator = `-- name: CreateValidator :one
-INSERT INTO validators (address, public_key, voting_power, moniker)
-VALUES (?, ?, ?, ?)
-RETURNING id, address, public_key, voting_power, moniker, created_at, updated_at
+INSERT INTO validators (operator_address, hex_address, public_key, voting_power, moniker)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, operator_address, hex_address, public_key, voting_power, moniker, created_at, updated_at
 `
 
 type CreateValidatorParams struct {
-	Address     string         `json:"address"`
-	PublicKey   string         `json:"public_key"`
-	VotingPower int64          `json:"voting_power"`
-	Moniker     sql.NullString `json:"moniker"`
+	OperatorAddress string         `json:"operator_address"`
+	HexAddress      string         `json:"hex_address"`
+	PublicKey       string         `json:"public_key"`
+	VotingPower     int64          `json:"voting_power"`
+	Moniker         sql.NullString `json:"moniker"`
 }
 
 func (q *Queries) CreateValidator(ctx context.Context, arg CreateValidatorParams) (Validator, error) {
 	row := q.queryRow(ctx, q.createValidatorStmt, createValidator,
-		arg.Address,
+		arg.OperatorAddress,
+		arg.HexAddress,
 		arg.PublicKey,
 		arg.VotingPower,
 		arg.Moniker,
@@ -33,7 +35,8 @@ func (q *Queries) CreateValidator(ctx context.Context, arg CreateValidatorParams
 	var i Validator
 	err := row.Scan(
 		&i.ID,
-		&i.Address,
+		&i.OperatorAddress,
+		&i.HexAddress,
 		&i.PublicKey,
 		&i.VotingPower,
 		&i.Moniker,
@@ -44,24 +47,25 @@ func (q *Queries) CreateValidator(ctx context.Context, arg CreateValidatorParams
 }
 
 const deleteValidator = `-- name: DeleteValidator :exec
-DELETE FROM validators WHERE address = ?
+DELETE FROM validators WHERE hex_address = ?
 `
 
-func (q *Queries) DeleteValidator(ctx context.Context, address string) error {
-	_, err := q.exec(ctx, q.deleteValidatorStmt, deleteValidator, address)
+func (q *Queries) DeleteValidator(ctx context.Context, hexAddress string) error {
+	_, err := q.exec(ctx, q.deleteValidatorStmt, deleteValidator, hexAddress)
 	return err
 }
 
 const getValidator = `-- name: GetValidator :one
-SELECT id, address, public_key, voting_power, moniker, created_at, updated_at FROM validators WHERE address = ? LIMIT 1
+SELECT id, operator_address, hex_address, public_key, voting_power, moniker, created_at, updated_at FROM validators WHERE  hex_address = ? LIMIT 1
 `
 
-func (q *Queries) GetValidator(ctx context.Context, address string) (Validator, error) {
-	row := q.queryRow(ctx, q.getValidatorStmt, getValidator, address)
+func (q *Queries) GetValidator(ctx context.Context, hexAddress string) (Validator, error) {
+	row := q.queryRow(ctx, q.getValidatorStmt, getValidator, hexAddress)
 	var i Validator
 	err := row.Scan(
 		&i.ID,
-		&i.Address,
+		&i.OperatorAddress,
+		&i.HexAddress,
 		&i.PublicKey,
 		&i.VotingPower,
 		&i.Moniker,
@@ -72,7 +76,7 @@ func (q *Queries) GetValidator(ctx context.Context, address string) (Validator, 
 }
 
 const getValidators = `-- name: GetValidators :many
-SELECT id, address, public_key, voting_power, moniker, created_at, updated_at FROM validators ORDER BY voting_power DESC
+SELECT id, operator_address, hex_address, public_key, voting_power, moniker, created_at, updated_at FROM validators ORDER BY voting_power DESC
 `
 
 func (q *Queries) GetValidators(ctx context.Context) ([]Validator, error) {
@@ -86,7 +90,8 @@ func (q *Queries) GetValidators(ctx context.Context) ([]Validator, error) {
 		var i Validator
 		if err := rows.Scan(
 			&i.ID,
-			&i.Address,
+			&i.OperatorAddress,
+			&i.HexAddress,
 			&i.PublicKey,
 			&i.VotingPower,
 			&i.Moniker,
@@ -107,16 +112,17 @@ func (q *Queries) GetValidators(ctx context.Context) ([]Validator, error) {
 }
 
 const getValidatorsByHeight = `-- name: GetValidatorsByHeight :many
-SELECT v.id, v.address, v.public_key, v.voting_power, v.moniker, v.created_at, v.updated_at, vs.voting_power, vs.voting_power_percent, vs.is_proposer
+SELECT v.id, v.operator_address, v.hex_address, v.public_key, v.voting_power, v.moniker, v.created_at, v.updated_at, vs.voting_power, vs.voting_power_percent, vs.is_proposer
 FROM validators v
-JOIN validator_snapshots vs ON v.address = vs.validator_address
+JOIN validator_snapshots vs ON v.hex_address = vs.validator_hex_address
 WHERE vs.height = ?
 ORDER BY vs.voting_power DESC
 `
 
 type GetValidatorsByHeightRow struct {
 	ID                 int64           `json:"id"`
-	Address            string          `json:"address"`
+	OperatorAddress    string          `json:"operator_address"`
+	HexAddress         string          `json:"hex_address"`
 	PublicKey          string          `json:"public_key"`
 	VotingPower        int64           `json:"voting_power"`
 	Moniker            sql.NullString  `json:"moniker"`
@@ -138,7 +144,8 @@ func (q *Queries) GetValidatorsByHeight(ctx context.Context, height int64) ([]Ge
 		var i GetValidatorsByHeightRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.Address,
+			&i.OperatorAddress,
+			&i.HexAddress,
 			&i.PublicKey,
 			&i.VotingPower,
 			&i.Moniker,
@@ -163,29 +170,32 @@ func (q *Queries) GetValidatorsByHeight(ctx context.Context, height int64) ([]Ge
 
 const updateValidator = `-- name: UpdateValidator :one
 UPDATE validators 
-SET public_key = ?, voting_power = ?, moniker = ?, updated_at = CURRENT_TIMESTAMP
-WHERE address = ?
-RETURNING id, address, public_key, voting_power, moniker, created_at, updated_at
+SET operator_address = ?, public_key = ?, voting_power = ?, moniker = ?, updated_at = CURRENT_TIMESTAMP
+WHERE hex_address = ?
+RETURNING id, operator_address, hex_address, public_key, voting_power, moniker, created_at, updated_at
 `
 
 type UpdateValidatorParams struct {
-	PublicKey   string         `json:"public_key"`
-	VotingPower int64          `json:"voting_power"`
-	Moniker     sql.NullString `json:"moniker"`
-	Address     string         `json:"address"`
+	OperatorAddress string         `json:"operator_address"`
+	PublicKey       string         `json:"public_key"`
+	VotingPower     int64          `json:"voting_power"`
+	Moniker         sql.NullString `json:"moniker"`
+	HexAddress      string         `json:"hex_address"`
 }
 
 func (q *Queries) UpdateValidator(ctx context.Context, arg UpdateValidatorParams) (Validator, error) {
 	row := q.queryRow(ctx, q.updateValidatorStmt, updateValidator,
+		arg.OperatorAddress,
 		arg.PublicKey,
 		arg.VotingPower,
 		arg.Moniker,
-		arg.Address,
+		arg.HexAddress,
 	)
 	var i Validator
 	err := row.Scan(
 		&i.ID,
-		&i.Address,
+		&i.OperatorAddress,
+		&i.HexAddress,
 		&i.PublicKey,
 		&i.VotingPower,
 		&i.Moniker,
@@ -196,26 +206,29 @@ func (q *Queries) UpdateValidator(ctx context.Context, arg UpdateValidatorParams
 }
 
 const upsertValidator = `-- name: UpsertValidator :one
-INSERT INTO validators (address, public_key, voting_power, moniker)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(address) DO UPDATE SET
+INSERT INTO validators (operator_address, hex_address, public_key, voting_power, moniker)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(hex_address) DO UPDATE SET
+    operator_address = excluded.operator_address,
     public_key = excluded.public_key,
     voting_power = excluded.voting_power,
     moniker = excluded.moniker,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, address, public_key, voting_power, moniker, created_at, updated_at
+RETURNING id, operator_address, hex_address, public_key, voting_power, moniker, created_at, updated_at
 `
 
 type UpsertValidatorParams struct {
-	Address     string         `json:"address"`
-	PublicKey   string         `json:"public_key"`
-	VotingPower int64          `json:"voting_power"`
-	Moniker     sql.NullString `json:"moniker"`
+	OperatorAddress string         `json:"operator_address"`
+	HexAddress      string         `json:"hex_address"`
+	PublicKey       string         `json:"public_key"`
+	VotingPower     int64          `json:"voting_power"`
+	Moniker         sql.NullString `json:"moniker"`
 }
 
 func (q *Queries) UpsertValidator(ctx context.Context, arg UpsertValidatorParams) (Validator, error) {
 	row := q.queryRow(ctx, q.upsertValidatorStmt, upsertValidator,
-		arg.Address,
+		arg.OperatorAddress,
+		arg.HexAddress,
 		arg.PublicKey,
 		arg.VotingPower,
 		arg.Moniker,
@@ -223,7 +236,8 @@ func (q *Queries) UpsertValidator(ctx context.Context, arg UpsertValidatorParams
 	var i Validator
 	err := row.Scan(
 		&i.ID,
-		&i.Address,
+		&i.OperatorAddress,
+		&i.HexAddress,
 		&i.PublicKey,
 		&i.VotingPower,
 		&i.Moniker,

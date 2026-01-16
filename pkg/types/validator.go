@@ -2,41 +2,36 @@ package types
 
 import (
 	"fmt"
-	"main/pkg/utils"
 	"math/big"
 	"strconv"
+
+	"main/pkg/utils"
 
 	"github.com/cometbft/cometbft/p2p"
 	ctypes "github.com/cometbft/cometbft/types"
 )
 
-
-// TMValidator represents a unified validator type based on CometBFT with tmtop extensions
 type TMValidator struct {
-	// Core CometBFT validator data
-	ctypes.Validator
+	CometValidator  *ctypes.Validator
+	CosmosValidator *CosmosValidator
 
-	// tmtop-specific fields
-	Index              int              // Display index for UI
-	VotingPowerPercent *big.Float       // Calculated percentage
-	PeerID             p2p.ID           // P2P network ID
-
-	// Optional chain-specific metadata
-	ChainValidator *ChainValidator     // Moniker, assigned addresses, etc.
+	Index              int        // Display index for UI
+	VotingPowerPercent *big.Float // Calculated percentage
+	PeerID             p2p.ID     // P2P network ID
 
 	// Current round vote state (optional)
-	CurrentRoundVote *RoundVoteState   // Vote state for current round
+	CurrentRoundVote *RoundVoteState // Vote state for current round
 }
 
-// GetDisplayAddress returns the best available address for display
+// GetDisplayAddress returns the best available address for display.
 func (v TMValidator) GetDisplayAddress() string {
-	return v.Address.String()
+	return v.CosmosValidator.OperatorAddress
 }
 
-// GetDisplayName returns the best available name for display
+// GetDisplayName returns the best available name for display.
 func (v TMValidator) GetDisplayName() string {
-	if v.ChainValidator != nil && v.ChainValidator.Moniker != "" {
-		return v.ChainValidator.Moniker
+	if v.CosmosValidator != nil && v.CosmosValidator.Moniker != "" {
+		return v.CosmosValidator.Moniker
 	}
 	// Truncate address for display
 	addr := v.GetDisplayAddress()
@@ -46,12 +41,12 @@ func (v TMValidator) GetDisplayName() string {
 	return addr
 }
 
-// HasAssignedKey returns true if validator has an assigned consensus key
+// HasAssignedKey returns true if validator has an assigned consensus key.
 func (v TMValidator) HasAssignedKey() bool {
-	return v.ChainValidator != nil && v.ChainValidator.AssignedAddress != ""
+	return v.CosmosValidator != nil && v.CosmosValidator.AssignedAddress != ""
 }
 
-// Serialize returns formatted string for display (replaces ValidatorWithInfo.Serialize)
+// Serialize returns formatted string for display (replaces ValidatorWithInfo.Serialize).
 func (v TMValidator) Serialize(disableEmojis bool) string {
 	name := v.GetDisplayName()
 	if v.HasAssignedKey() {
@@ -93,7 +88,7 @@ func (v TMValidator) Serialize(disableEmojis bool) string {
 
 type TMValidators []TMValidator
 
-// GetTotalVotingPower returns the sum of all validators' voting power
+// GetTotalVotingPower returns the sum of all validators' voting power.
 func (v TMValidators) GetTotalVotingPower() *big.Int {
 	sum := big.NewInt(0)
 	for _, validator := range v {
@@ -102,7 +97,7 @@ func (v TMValidators) GetTotalVotingPower() *big.Int {
 	return sum
 }
 
-// GetTotalVotingPowerPrevotedPercent calculates percentage of voting power that prevoted
+// GetTotalVotingPowerPrevotedPercent calculates percentage of voting power that prevoted.
 func (v TMValidators) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
 	prevoted := big.NewInt(0)
 	totalVP := big.NewInt(0)
@@ -110,8 +105,8 @@ func (v TMValidators) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) 
 	for _, validator := range v {
 		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
 		if validator.CurrentRoundVote != nil {
-			if validator.CurrentRoundVote.Prevote == VoteStateForBlock || 
-			   (countDisagreeing && validator.CurrentRoundVote.Prevote == VoteStateNone) {
+			if validator.CurrentRoundVote.Prevote == VoteStateForBlock ||
+				(countDisagreeing && validator.CurrentRoundVote.Prevote == VoteStateNone) {
 				prevoted = prevoted.Add(prevoted, big.NewInt(validator.VotingPower))
 			}
 		}
@@ -124,7 +119,7 @@ func (v TMValidators) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) 
 	return votingPowerPercent
 }
 
-// GetTotalVotingPowerPrecommittedPercent calculates percentage of voting power that precommitted
+// GetTotalVotingPowerPrecommittedPercent calculates percentage of voting power that precommitted.
 func (v TMValidators) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
 	precommitted := big.NewInt(0)
 	totalVP := big.NewInt(0)
@@ -132,8 +127,8 @@ func (v TMValidators) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bo
 	for _, validator := range v {
 		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
 		if validator.CurrentRoundVote != nil {
-			if validator.CurrentRoundVote.Precommit == VoteStateForBlock || 
-			   (countDisagreeing && validator.CurrentRoundVote.Precommit == VoteStateNone) {
+			if validator.CurrentRoundVote.Precommit == VoteStateForBlock ||
+				(countDisagreeing && validator.CurrentRoundVote.Precommit == VoteStateNone) {
 				precommitted = precommitted.Add(precommitted, big.NewInt(validator.VotingPower))
 			}
 		}
@@ -146,8 +141,7 @@ func (v TMValidators) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bo
 	return votingPowerPercent
 }
 
-
-// RoundVoteState represents validator vote state for a specific round using new VoteState
+// RoundVoteState represents validator vote state for a specific round using new VoteState.
 type RoundVoteState struct {
 	Address    string
 	Prevote    VoteState
@@ -162,5 +156,3 @@ func (v RoundVoteState) Serialize(disableEmojis bool) string {
 		v.Precommit.Serialize(disableEmojis),
 	)
 }
-
-

@@ -1,0 +1,188 @@
+-- name: GetValidatorSigningEfficiency :one
+-- Calculate signing efficiency for a validator over a time window
+WITH block_participation AS (
+    SELECT 
+        h.height,
+        h.block_time,
+        COUNT(v.id) as votes_cast,
+        CASE WHEN COUNT(v.id) > 0 THEN 1 ELSE 0 END as participated
+    FROM heights h 
+    LEFT JOIN votes v ON h.height = v.height AND v.validator_hex_address = ?
+    WHERE h.block_time >= ? AND h.block_time <= ?
+    GROUP BY h.height, h.block_time
+)
+SELECT 
+    COALESCE(COUNT(*), 0) as total_blocks,
+    COALESCE(SUM(participated), 0) as blocks_signed,
+    COALESCE(COUNT(*) - SUM(participated), 0) as blocks_missed,
+    COALESCE(ROUND(100.0 * SUM(participated) / NULLIF(COUNT(*), 0), 2), 0.0) as signing_efficiency
+FROM block_participation;
+
+-- name: GetValidatorConsensusParticipation :one
+-- Calculate consensus participation rates for prevotes and precommits
+WITH vote_participation AS (
+    SELECT 
+        r.height,
+        r.round_number,
+        COUNT(CASE WHEN v.vote_type = 1 THEN 1 END) as prevotes,
+        COUNT(CASE WHEN v.vote_type = 2 THEN 1 END) as precommits,
+        COUNT(DISTINCT r.round_number) as total_rounds
+    FROM rounds r
+    LEFT JOIN votes v ON r.height = v.height AND r.round_number = v.round_number AND v.validator_hex_address = ?
+    LEFT JOIN heights h ON r.height = h.height
+    WHERE h.block_time >= ? AND h.block_time <= ?
+    GROUP BY r.height, r.round_number
+)
+SELECT 
+    COALESCE(COUNT(*), 0) as total_rounds,
+    COALESCE(SUM(CASE WHEN prevotes > 0 THEN 1 ELSE 0 END), 0) as rounds_with_prevote,
+    COALESCE(SUM(CASE WHEN precommits > 0 THEN 1 ELSE 0 END), 0) as rounds_with_precommit,
+    COALESCE(ROUND(100.0 * SUM(CASE WHEN prevotes > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2), 0.0) as prevote_rate,
+    COALESCE(ROUND(100.0 * SUM(CASE WHEN precommits > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2), 0.0) as precommit_rate
+FROM vote_participation;
+
+-- name: GetValidatorMissedBlockStreaks :many
+-- Find consecutive missed block sequences for a validator
+WITH block_sequence AS (
+    SELECT 
+        h.height,
+        h.block_time,
+        CASE WHEN v.id IS NULL THEN 1 ELSE 0 END as missed,
+        ROW_NUMBER() OVER (ORDER BY h.height) as rn
+    FROM heights h
+    LEFT JOIN votes v ON h.height = v.height AND v.validator_hex_address = ?
+    WHERE h.block_time >= ? AND h.block_time <= ?
+),
+miss_groups AS (
+    SELECT 
+        height,
+        block_time,
+        missed,
+        rn - ROW_NUMBER() OVER (PARTITION BY missed ORDER BY height) as grp
+    FROM block_sequence
+    WHERE missed = 1
+)
+SELECT 
+    COUNT(*) as consecutive_misses,
+    MIN(height) as streak_start_height,
+    MAX(height) as streak_end_height,
+    MIN(block_time) as streak_start_time,
+    MAX(block_time) as streak_end_time
+FROM miss_groups 
+GROUP BY grp
+HAVING COUNT(*) > 0
+ORDER BY consecutive_misses DESC;
+
+-- name: GetAllValidatorsSigningEfficiency :many
+-- Get signing efficiency for all validators over a time window
+WITH validator_participation AS (
+    SELECT 
+        vals.hex_address,
+        vals.moniker,
+        h.height,
+        CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END as participated
+    FROM validators vals
+    CROSS JOIN heights h
+    LEFT JOIN votes v ON vals.hex_address = v.validator_hex_address AND h.height = v.height
+    WHERE h.block_time >= ? AND h.block_time <= ?
+)
+SELECT 
+    hex_address,
+    moniker,
+    COUNT(*) as total_blocks,
+    SUM(participated) as blocks_signed,
+    COUNT(*) - SUM(participated) as blocks_missed,
+    ROUND(100.0 * SUM(participated) / COUNT(*), 2) as signing_efficiency
+FROM validator_participation 
+GROUP BY hex_address, moniker
+ORDER BY signing_efficiency DESC;
+
+-- name: GetValidatorPerformanceTimeSeries :many
+-- Get signing efficiency over time buckets (hourly)
+WITH time_buckets AS (
+    SELECT 
+        datetime(h.block_time, 'start of hour') as time_bucket,
+        COUNT(*) as blocks_in_bucket,
+        SUM(CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END) as blocks_signed
+    FROM heights h
+    LEFT JOIN votes v ON h.height = v.height AND v.validator_hex_address = ?
+    WHERE h.block_time >= ? AND h.block_time <= ?
+    GROUP BY datetime(h.block_time, 'start of hour')
+)
+SELECT 
+    time_bucket,
+    COALESCE(blocks_in_bucket, 0) as blocks_in_bucket,
+    COALESCE(blocks_signed, 0) as blocks_signed,
+    COALESCE(blocks_in_bucket - blocks_signed, 0) as blocks_missed,
+    COALESCE(ROUND(100.0 * blocks_signed / NULLIF(blocks_in_bucket, 0), 2), 0.0) as signing_efficiency
+FROM time_buckets 
+ORDER BY time_bucket;
+
+-- name: GetValidatorRanking :many
+-- Get validator performance ranking with multiple metrics
+WITH validator_metrics AS (
+    SELECT 
+        vals.hex_address,
+        vals.moniker,
+        -- Block signing metrics
+        COUNT(h.height) as total_blocks,
+        COUNT(v.id) as blocks_signed,
+        ROUND(100.0 * COUNT(v.id) / COUNT(h.height), 2) as signing_efficiency,
+        
+        -- Consensus participation
+        COUNT(CASE WHEN v.vote_type = 1 THEN 1 END) as prevotes_cast,
+        COUNT(CASE WHEN v.vote_type = 2 THEN 1 END) as precommits_cast,
+        
+        -- Latest voting power
+        COALESCE(MAX(vs.voting_power), 0) as voting_power
+    FROM validators vals
+    CROSS JOIN heights h
+    LEFT JOIN votes v ON vals.hex_address = v.validator_hex_address AND h.height = v.height
+    LEFT JOIN validator_snapshots vs ON vals.hex_address = vs.validator_hex_address AND h.height = vs.height
+    WHERE h.block_time >= ? AND h.block_time <= ?
+    GROUP BY vals.hex_address, vals.moniker
+)
+SELECT 
+    hex_address,
+    moniker,
+    total_blocks,
+    blocks_signed,
+    total_blocks - blocks_signed as blocks_missed,
+    signing_efficiency,
+    prevotes_cast,
+    precommits_cast,
+    voting_power,
+    RANK() OVER (ORDER BY signing_efficiency DESC, voting_power DESC) as efficiency_rank
+FROM validator_metrics
+ORDER BY efficiency_rank;
+
+-- name: GetValidatorUptime :one
+-- Calculate validator uptime metrics over time window
+WITH block_stats AS (
+    SELECT 
+        COUNT(*) as total_blocks_in_window,
+        COUNT(v.id) as blocks_participated,
+        MIN(h.block_time) as window_start,
+        MAX(h.block_time) as window_end
+    FROM heights h
+    LEFT JOIN votes v ON h.height = v.height AND v.validator_hex_address = ?
+    WHERE h.block_time >= ? AND h.block_time <= ?
+)
+SELECT 
+    COALESCE(bs.total_blocks_in_window, 0) as total_blocks_in_window,
+    COALESCE(bs.blocks_participated, 0) as blocks_participated,
+    COALESCE(bs.total_blocks_in_window - bs.blocks_participated, 0) as blocks_missed,
+    COALESCE(ROUND(100.0 * bs.blocks_participated / NULLIF(bs.total_blocks_in_window, 0), 2), 0.0) as uptime_percentage,
+    bs.window_start,
+    bs.window_end
+FROM block_stats bs;
+
+-- name: GetProposerPerformance :one
+-- Calculate proposer performance metrics (when validator is selected as proposer)
+SELECT 
+    COUNT(*) as blocks_proposed,
+    COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as successful_proposals,
+    ROUND(100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) / COUNT(*), 2) as proposal_success_rate
+FROM rounds r
+JOIN heights h ON r.height = h.height
+WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time <= ?;

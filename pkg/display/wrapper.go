@@ -2,11 +2,12 @@ package display
 
 import (
 	"fmt"
+	"strings"
+	"time"
+
 	configPkg "main/pkg/config"
 	"main/pkg/types"
 	"main/static"
-	"strings"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -420,7 +421,7 @@ func (w *Wrapper) Redraw() {
 	}
 }
 
-// cleanup ensures proper terminal state restoration
+// cleanup ensures proper terminal state restoration.
 func (w *Wrapper) cleanup() {
 	if w.App != nil {
 		// Stop the application gracefully
@@ -431,7 +432,7 @@ func (w *Wrapper) cleanup() {
 	w.restoreTerminal()
 }
 
-// restoreTerminal restores terminal state
+// restoreTerminal restores terminal state.
 func (w *Wrapper) restoreTerminal() {
 	// Send terminal reset sequences to restore state
 	fmt.Print("\033[?25h")   // Show cursor
