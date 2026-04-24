@@ -28,19 +28,19 @@ import (
 )
 
 type CosmosRPCDataFetcher struct {
-	Config         *config.Config
-	Logger         zerolog.Logger
-	State          *types.State
-	ProviderClient *http.Client
+	config         *config.Config
+	logger         zerolog.Logger
+	getURL         func() string
+	providerClient *http.Client
 
-	Registry   codecTypes.InterfaceRegistry
-	ParseCodec *codec.ProtoCodec
-	TxDecoder  sdkTypes.TxDecoder
+	registry   codecTypes.InterfaceRegistry
+	parseCodec *codec.ProtoCodec
+	txDecoder  sdkTypes.TxDecoder
 }
 
 var _ cosmosRPCFetcher = (*CosmosRPCDataFetcher)(nil)
 
-func newCosmosRPCDataFetcher(config *config.Config, state *types.State, logger zerolog.Logger) *CosmosRPCDataFetcher {
+func newCosmosRPCDataFetcher(config *config.Config, getURL func() string, logger zerolog.Logger) *CosmosRPCDataFetcher {
 	interfaceRegistry := codecTypes.NewInterfaceRegistry()
 	std.RegisterInterfaces(interfaceRegistry)
 	stakingTypes.RegisterInterfaces(interfaceRegistry) // for MsgCreateValidator for gentx parsing
@@ -48,25 +48,25 @@ func newCosmosRPCDataFetcher(config *config.Config, state *types.State, logger z
 	parseCodec := codec.NewProtoCodec(interfaceRegistry)
 
 	return &CosmosRPCDataFetcher{
-		Config:         config,
-		State:          state,
-		Logger:         logger.With().Str("component", "cosmos_data_fetcher").Logger(),
-		ProviderClient: http.NewClient(logger, "cosmos_data_fetcher", config.ProviderRPCHost),
-		Registry:       interfaceRegistry,
-		ParseCodec:     parseCodec,
-		TxDecoder:      tx.NewTxConfig(parseCodec, tx.DefaultSignModes).TxJSONDecoder(),
+		config:         config,
+		getURL:         getURL,
+		logger:         logger.With().Str("component", "cosmos_data_fetcher").Logger(),
+		providerClient: http.NewClient(logger, "cosmos_data_fetcher", config.ProviderRPCHost),
+		registry:       interfaceRegistry,
+		parseCodec:     parseCodec,
+		txDecoder:      tx.NewTxConfig(parseCodec, tx.DefaultSignModes).TxJSONDecoder(),
 	}
 }
 
 func (f *CosmosRPCDataFetcher) getProviderOrConsumerClient() *http.Client {
-	if f.Config.ProviderRPCHost != "" {
-		return f.ProviderClient
+	if f.config.ProviderRPCHost != "" {
+		return f.providerClient
 	}
 	return f.client()
 }
 
 func (f *CosmosRPCDataFetcher) client() *http.Client {
-	return http.NewClient(f.Logger, "cosmos_data_fetcher", f.State.CurrentRPC().URL)
+	return http.NewClient(f.logger, "cosmos_data_fetcher", f.getURL())
 }
 
 func (f *CosmosRPCDataFetcher) abciQuery(
@@ -133,16 +133,16 @@ func (f *CosmosRPCDataFetcher) GetValidators() (types.CosmosValidators, error) {
 		validators[i] = v
 	}
 
-	if !f.Config.IsConsumer() {
+	if !f.config.IsConsumer() {
 		return validators, nil
 	}
 
 	var assignedKeysResponse providerTypes.QueryAllPairsValConsAddrByConsumerResponse
 	err := f.abciQuery(
 		"/interchain_security.ccv.provider.v1.Query/QueryAllPairsValConsAddrByConsumer",
-		&providerTypes.QueryAllPairsValConsAddrByConsumerRequest{ConsumerId: f.Config.ConsumerID},
+		&providerTypes.QueryAllPairsValConsAddrByConsumerRequest{ConsumerId: f.config.ConsumerID},
 		&assignedKeysResponse,
-		f.ProviderClient,
+		f.providerClient,
 	)
 	if err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (f *CosmosRPCDataFetcher) GetValidators() (types.CosmosValidators, error) {
 			func(i *providerTypes.PairValConAddrProviderAndConsumer) bool {
 				equal, compareErr := utils.CompareTwoBech32(i.ProviderAddress, validator.ConsensusAddress)
 				if compareErr != nil {
-					f.Logger.Error().
+					f.logger.Error().
 						Str("operator_address", validator.OperatorAddress).
 						Str("first", i.ProviderAddress).
 						Str("second", validator.ConsensusAddress).
@@ -178,15 +178,15 @@ func (f *CosmosRPCDataFetcher) GetValidators() (types.CosmosValidators, error) {
 }
 
 func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, error) {
-	f.Logger.Info().Msg("Fetching genesis validators...")
+	f.logger.Info().Msg("Fetching genesis validators...")
 
 	genesisChunks := make([][]byte, 0)
 	var chunk int64 = 0
 
 	for {
-		f.Logger.Info().Int64("chunk", chunk).Msg("Fetching genesis chunk...")
+		f.logger.Info().Int64("chunk", chunk).Msg("Fetching genesis chunk...")
 		genesisChunk, total, err := f.getGenesisChunk(chunk)
-		f.Logger.Info().Int64("chunk", chunk).Int64("total", total).Msg("Fetched genesis chunk...")
+		f.logger.Info().Int64("chunk", chunk).Int64("total", total).Msg("Fetched genesis chunk...")
 		if err != nil {
 			return nil, err
 		}
@@ -201,23 +201,23 @@ func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, e
 	}
 
 	genesisBytes := bytes.Join(genesisChunks, []byte{})
-	f.Logger.Info().Int("length", len(genesisBytes)).Msg("Fetched genesis")
+	f.logger.Info().Int("length", len(genesisBytes)).Msg("Fetched genesis")
 
 	var genesisStruct types.Genesis
 
 	if err := json.Unmarshal(genesisBytes, &genesisStruct); err != nil {
-		f.Logger.Error().Err(err).Msg("Error unmarshalling genesis")
+		f.logger.Error().Err(err).Msg("Error unmarshalling genesis")
 		return nil, err
 	}
 
 	var stakingGenesisState stakingTypes.GenesisState
-	err := f.ParseCodec.UnmarshalJSON(genesisStruct.AppState.Staking, &stakingGenesisState)
+	err := f.parseCodec.UnmarshalJSON(genesisStruct.AppState.Staking, &stakingGenesisState)
 	if err != nil {
-		f.Logger.Error().Err(err).Msg("Error unmarshalling staking genesis state")
+		f.logger.Error().Err(err).Msg("Error unmarshalling staking genesis state")
 		return nil, err
 	}
 
-	f.Logger.Info().Int("validators", len(stakingGenesisState.Validators)).Msg("Genesis unmarshalled")
+	f.logger.Info().Int("validators", len(stakingGenesisState.Validators)).Msg("Genesis unmarshalled")
 
 	// 1. Trying to fetch validators from staking module. Works for chain which did not start
 	// from the first block but had their genesis as an export from older chain.
@@ -237,21 +237,21 @@ func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, e
 	// 2. If there's 0 validators in staking module, then we parse genutil module
 	// and converting validators from their gentxs.
 	var genutilGenesisState genutilTypes.GenesisState
-	if err := f.ParseCodec.UnmarshalJSON(genesisStruct.AppState.Genutil, &genutilGenesisState); err != nil {
-		f.Logger.Error().Err(err).Msg("Error unmarshalling genutil genesis state")
+	if err := f.parseCodec.UnmarshalJSON(genesisStruct.AppState.Genutil, &genutilGenesisState); err != nil {
+		f.logger.Error().Err(err).Msg("Error unmarshalling genutil genesis state")
 		return nil, err
 	}
 
 	validators := make(types.CosmosValidators, len(genutilGenesisState.GenTxs))
 	for index, gentx := range genutilGenesisState.GenTxs {
-		decodedTx, err := f.TxDecoder(gentx)
+		decodedTx, err := f.txDecoder(gentx)
 		if err != nil {
-			f.Logger.Error().Err(err).Msg("Error decoding gentx")
+			f.logger.Error().Err(err).Msg("Error decoding gentx")
 			return nil, err
 		}
 
 		if len(decodedTx.GetMsgs()) != 1 {
-			f.Logger.Error().
+			f.logger.Error().
 				Int("length", len(decodedTx.GetMsgs())).
 				Msg("Error decoding gentx: expected 1 message")
 			return nil, err
@@ -260,13 +260,13 @@ func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, e
 		msg := decodedTx.GetMsgs()[0]
 		msgCreateValidator, ok := msg.(*stakingTypes.MsgCreateValidator)
 		if !ok {
-			f.Logger.Error().Msg("gentx msg is not MsgCreateValidator")
+			f.logger.Error().Msg("gentx msg is not MsgCreateValidator")
 			return nil, err
 		}
 
 		var pubkey cryptoTypes.PubKey
-		if err := f.ParseCodec.UnpackAny(msgCreateValidator.Pubkey, &pubkey); err != nil {
-			f.Logger.Error().Err(err).Msg("Error unpacking pubkey")
+		if err := f.parseCodec.UnpackAny(msgCreateValidator.Pubkey, &pubkey); err != nil {
+			f.logger.Error().Err(err).Msg("Error unpacking pubkey")
 			return nil, err
 		}
 
@@ -302,7 +302,7 @@ func (f *CosmosRPCDataFetcher) getGenesisChunk(chunk int64) ([]byte, int64, erro
 }
 
 func (f *CosmosRPCDataFetcher) parseValidator(validator stakingTypes.Validator) (types.CosmosValidator, error) {
-	if err := validator.UnpackInterfaces(f.ParseCodec); err != nil {
+	if err := validator.UnpackInterfaces(f.parseCodec); err != nil {
 		return types.CosmosValidator{}, err
 	}
 

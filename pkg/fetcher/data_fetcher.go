@@ -28,19 +28,21 @@ type cosmosRPCFetcher interface {
 }
 
 func NewDataFetcher(config *configPkg.Config, state *types.State, logger zerolog.Logger) *DataFetcher {
+	getCurrentURL := func() string { return state.CurrentRPC().URL }
+
 	var cosmosFetcher cosmosRPCFetcher
 	if config.ChainType == "tendermint" {
 		cosmosFetcher = newNoopDataFetcher()
 	} else if config.ChainType == "cosmos-lcd" {
 		cosmosFetcher = NewCosmosLCDDataFetcher(config, logger)
 	} else {
-		cosmosFetcher = newCosmosRPCDataFetcher(config, state, logger)
+		cosmosFetcher = newCosmosRPCDataFetcher(config, getCurrentURL, logger)
 	}
 
 	return &DataFetcher{
 		logger:        logger,
 		cosmosFetcher: cosmosFetcher,
-		cometFetcher:  NewCometRPC(config, state, logger),
+		cometFetcher:  NewCometRPC(config, getCurrentURL, logger),
 		cometWS:       NewCometRPCWebsocket(config.RPCHost, logger),
 	}
 }

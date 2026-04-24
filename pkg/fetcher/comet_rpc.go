@@ -18,30 +18,37 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// CometRPC talks to a CometBFT RPC endpoint. The endpoint URL is
+// resolved lazily via getURL so callers can switch RPCs at runtime
+// without rebuilding the client.
 type CometRPC struct {
-	url          string
+	getURL       func() string
 	logger       zerolog.Logger
 	blocksBehind uint64
 }
 
-func NewCometRPC(config *config.Config, state *types.State, logger zerolog.Logger) *CometRPC {
+// NewCometRPC builds an RPC client bound to the URL returned by
+// getURL at call time. getURL is called on every request.
+func NewCometRPC(config *config.Config, getURL func() string, logger zerolog.Logger) *CometRPC {
 	return &CometRPC{
-		url:          state.CurrentRPC().URL,
+		getURL:       getURL,
 		logger:       logger.With().Str("component", "comet_rpc").Logger(),
 		blocksBehind: config.BlocksBehind,
 	}
 }
 
+// WithEndpoint returns a CometRPC pinned to a fixed URL. Used for
+// one-off queries against specific peers (e.g. topology crawler).
 func (rpc *CometRPC) WithEndpoint(url string) *CometRPC {
 	return &CometRPC{
-		url:          url,
+		getURL:       func() string { return url },
 		logger:       rpc.logger,
 		blocksBehind: rpc.blocksBehind,
 	}
 }
 
 func (rpc *CometRPC) client() *http.Client {
-	return http.NewClient(rpc.logger, "comet_rpc", rpc.url)
+	return http.NewClient(rpc.logger, "comet_rpc", rpc.getURL())
 }
 
 func (rpc *CometRPC) request(path string, target any) error {
