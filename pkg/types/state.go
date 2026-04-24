@@ -382,23 +382,6 @@ func (s *State) SetTMValidators(validators TMValidators) {
 	s.TMValidators = validators
 }
 
-// UpdateTMValidatorsWithRoundVotes updates current round vote state for all validators.
-func (s *State) UpdateTMValidatorsWithRoundVotes(height int64, round int32) {
-	for i := range s.TMValidators {
-		validator := &s.TMValidators[i]
-
-		// Create current round vote state from VotesByRound data
-		roundVoteState := &RoundVoteState{
-			Address:    validator.GetDisplayAddress(),
-			Prevote:    s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrevoteType),
-			Precommit:  s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrecommitType),
-			IsProposer: s.VotesByRound.GetProposers(height, round).Has(validator.GetDisplayAddress()),
-		}
-
-		validator.CurrentRoundVote = roundVoteState
-	}
-}
-
 // GetTotalVotingPowerPrevotedPercent calculates percentage using RoundDataMap.
 func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
 	if len(s.TMValidators) == 0 {
