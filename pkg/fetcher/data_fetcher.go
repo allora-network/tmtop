@@ -1,6 +1,7 @@
 package fetcher
 
 import (
+	"context"
 	"math/big"
 	"time"
 
@@ -70,6 +71,24 @@ func (f *DataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
 
 func (f *DataFetcher) Subscribe(mb *butils.Mailbox[ctypes.TMEventData], events ...string) {
 	f.cometWS.Subscribe(mb, events...)
+}
+
+// Close stops the websocket subscription and releases fetcher resources.
+// Safe to call multiple times. The context governs how long to wait for
+// the websocket goroutine to exit.
+func (f *DataFetcher) Close(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		f.cometWS.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (f *DataFetcher) GetValidators() ([]types.TMValidator, error) {
