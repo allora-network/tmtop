@@ -25,14 +25,14 @@ func (c CosmosValidators) ToMap() map[string]CosmosValidator {
 
 	for _, validator := range c {
 		// Index by operator address (bech32)
-		valsMap[validator.Address] = validator
+		valsMap[validator.OperatorAddress] = validator
 
 		// Index by consensus address for TMValidator matching
-		if validator.RawAddress != "" {
-			valsMap[validator.RawAddress] = validator
+		if validator.ConsensusAddress != "" {
+			valsMap[validator.ConsensusAddress] = validator
 
 			// Also index by hex format for CometBFT TMValidator matching
-			if consAddr, err := sdkTypes.ConsAddressFromBech32(validator.RawAddress); err == nil {
+			if consAddr, err := sdkTypes.ConsAddressFromBech32(validator.ConsensusAddress); err == nil {
 				hexAddr := strings.ToUpper(consAddr.String())
 				valsMap[hexAddr] = validator
 			}

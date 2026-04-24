@@ -92,7 +92,7 @@ type TMValidators []TMValidator
 func (v TMValidators) GetTotalVotingPower() *big.Int {
 	sum := big.NewInt(0)
 	for _, validator := range v {
-		sum = sum.Add(sum, big.NewInt(validator.VotingPower))
+		sum = sum.Add(sum, big.NewInt(validator.CometValidator.VotingPower))
 	}
 	return sum
 }
@@ -103,11 +103,11 @@ func (v TMValidators) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) 
 	totalVP := big.NewInt(0)
 
 	for _, validator := range v {
-		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.CometValidator.VotingPower))
 		if validator.CurrentRoundVote != nil {
 			if validator.CurrentRoundVote.Prevote == VoteStateForBlock ||
 				(countDisagreeing && validator.CurrentRoundVote.Prevote == VoteStateNone) {
-				prevoted = prevoted.Add(prevoted, big.NewInt(validator.VotingPower))
+				prevoted = prevoted.Add(prevoted, big.NewInt(validator.CometValidator.VotingPower))
 			}
 		}
 	}
@@ -125,11 +125,11 @@ func (v TMValidators) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bo
 	totalVP := big.NewInt(0)
 
 	for _, validator := range v {
-		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.CometValidator.VotingPower))
 		if validator.CurrentRoundVote != nil {
 			if validator.CurrentRoundVote.Precommit == VoteStateForBlock ||
 				(countDisagreeing && validator.CurrentRoundVote.Precommit == VoteStateNone) {
-				precommitted = precommitted.Add(precommitted, big.NewInt(validator.VotingPower))
+				precommitted = precommitted.Add(precommitted, big.NewInt(validator.CometValidator.VotingPower))
 			}
 		}
 	}

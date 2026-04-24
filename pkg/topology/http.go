@@ -66,7 +66,7 @@ func WithHTTPPeersAPI(state *types.State) tmhttp.Option {
 
 func WithHTTPDebugAPI(state *types.State) tmhttp.Option {
 	return tmhttp.WithRoute("GET", "/debug", butils.UnrestrictedCors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(state.ChainValidators)
+		_ = json.NewEncoder(w).Encode(state.TMValidators)
 	})))
 }
 

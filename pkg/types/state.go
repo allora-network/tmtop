@@ -547,12 +547,12 @@ func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.F
 	totalVP := big.NewInt(0)
 
 	for _, validator := range s.TMValidators {
-		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.CometValidator.VotingPower))
 
 		// Query RoundDataMap for current vote state
 		prevoteState := s.VotesByRound.GetVote(s.Height, int32(s.Round), validator.GetDisplayAddress(), cptypes.PrevoteType)
 		if prevoteState == VoteStateForBlock || (countDisagreeing && prevoteState == VoteStateNil) {
-			prevoted = prevoted.Add(prevoted, big.NewInt(validator.VotingPower))
+			prevoted = prevoted.Add(prevoted, big.NewInt(validator.CometValidator.VotingPower))
 		}
 	}
 
@@ -577,12 +577,12 @@ func (s *State) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *b
 	totalVP := big.NewInt(0)
 
 	for _, validator := range s.TMValidators {
-		totalVP = totalVP.Add(totalVP, big.NewInt(validator.VotingPower))
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.CometValidator.VotingPower))
 
 		// Query RoundDataMap for current vote state
 		precommitState := s.VotesByRound.GetVote(s.Height, int32(s.Round), validator.GetDisplayAddress(), cptypes.PrecommitType)
 		if precommitState == VoteStateForBlock || (countDisagreeing && precommitState == VoteStateNil) {
-			precommitted = precommitted.Add(precommitted, big.NewInt(validator.VotingPower))
+			precommitted = precommitted.Add(precommitted, big.NewInt(validator.CometValidator.VotingPower))
 		}
 	}
 

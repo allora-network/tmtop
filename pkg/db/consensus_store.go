@@ -126,23 +126,23 @@ func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, val
 		for _, validator := range validators {
 			// Determine operator address - use ChainValidator.Address if available, otherwise use hex address
 			operatorAddress := validator.GetDisplayAddress() // Default to hex address
-			if validator.ChainValidator != nil && validator.ChainValidator.Address != "" {
-				operatorAddress = validator.ChainValidator.Address
+			if validator.CosmosValidator != nil && validator.CosmosValidator.OperatorAddress != "" {
+				operatorAddress = validator.CosmosValidator.OperatorAddress
 			}
 
 			// Upsert validator
 			validatorParams := sqlc.UpsertValidatorParams{
 				OperatorAddress: operatorAddress,
 				HexAddress:      validator.GetDisplayAddress(),
-				PublicKey:       hex.EncodeToString(validator.PubKey.Bytes()),
-				VotingPower:     validator.VotingPower,
+				PublicKey:       hex.EncodeToString(validator.CometValidator.PubKey.Bytes()),
+				VotingPower:     validator.CometValidator.VotingPower,
 				Moniker:         sql.NullString{},
 			}
 
 			// Add moniker if available
-			if validator.ChainValidator != nil && validator.ChainValidator.Moniker != "" {
+			if validator.CosmosValidator != nil && validator.CosmosValidator.Moniker != "" {
 				validatorParams.Moniker = sql.NullString{
-					String: validator.ChainValidator.Moniker,
+					String: validator.CosmosValidator.Moniker,
 					Valid:  true,
 				}
 			}
@@ -165,7 +165,7 @@ func (cs *ConsensusStore) StoreValidators(ctx context.Context, height int64, val
 			snapshotParams := sqlc.UpsertValidatorSnapshotParams{
 				Height:              height,
 				ValidatorHexAddress: validator.GetDisplayAddress(),
-				VotingPower:         validator.VotingPower,
+				VotingPower:         validator.CometValidator.VotingPower,
 				VotingPowerPercent:  sql.NullFloat64{Float64: votingPowerPercent, Valid: true},
 				IsProposer:          sql.NullBool{}, // Will be set when we know the proposer
 			}

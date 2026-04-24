@@ -12,8 +12,8 @@ func newNoopDataFetcher() *noopDataFetcher {
 	return &noopDataFetcher{}
 }
 
-func (f *noopDataFetcher) GetValidators() (types.ChainValidators, error) {
-	return types.ChainValidators{}, nil
+func (f *noopDataFetcher) GetValidators() (types.CosmosValidators, error) {
+	return types.CosmosValidators{}, nil
 }
 
 func (f *noopDataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
