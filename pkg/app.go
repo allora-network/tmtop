@@ -18,6 +18,7 @@ import (
 	"main/pkg/fetcher"
 	tmhttp "main/pkg/http"
 	loggerPkg "main/pkg/logger"
+	"main/pkg/refresher"
 	"main/pkg/topology"
 	"main/pkg/types"
 
@@ -136,11 +137,12 @@ func (a *App) Start() {
 
 	a.spawn(a.CrawlRPCURLs)
 
-	a.spawn(a.GoRefreshConsensus)
-	a.spawn(a.GoRefreshCometNodeInfo)
-	a.spawn(a.GoRefreshUpgrade)
-	a.spawn(a.GoRefreshBlockTime)
-	a.spawn(a.GoRefreshNetInfo)
+	a.spawnRefresher("consensus", a.Config.RefreshRate, a.RefreshConsensus)
+	a.spawnRefresher("comet-node-info", a.Config.ChainInfoRefreshRate, a.RefreshCometNodeInfo)
+	a.spawnRefresher("upgrade", a.Config.UpgradeRefreshRate, a.RefreshUpgrade)
+	a.spawnRefresher("block-time", a.Config.BlockTimeRefreshRate, a.RefreshBlockTime)
+	a.spawnRefresher("net-info", a.Config.RefreshRate, a.RefreshNetInfo)
+
 	a.spawn(a.SubscribeCometBFT)
 	a.spawn(a.DisplayLogs)
 	a.spawn(a.databaseCleanupRoutine)
@@ -166,6 +168,16 @@ func (a *App) spawn(fn func()) {
 		defer a.wgDone.Done()
 		fn()
 	}()
+}
+
+// spawnRefresher starts a named refresh loop. The loop runs refresh
+// immediately, then on each interval tick, exiting on chStop. Panic
+// recovery is the same as any other refresh goroutine via HandlePanic.
+func (a *App) spawnRefresher(name string, interval time.Duration, refresh func()) {
+	a.spawn(func() {
+		defer a.HandlePanic()
+		refresher.New(name, interval, refresh, a.chStop, a.Logger).Run()
+	})
 }
 
 // Stop signals all background goroutines to exit and waits for them,
@@ -303,24 +315,6 @@ func (a *App) fetchRPCInfo(rpcURL string) {
 	}
 }
 
-func (a *App) GoRefreshConsensus() {
-	defer a.HandlePanic()
-
-	a.RefreshConsensus()
-
-	ticker := time.NewTicker(a.Config.RefreshRate)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-ticker.C:
-			a.RefreshConsensus()
-		}
-	}
-}
-
 func (a *App) RefreshConsensus() {
 	if a.IsPaused.Load() {
 		return
@@ -380,24 +374,6 @@ func (a *App) RefreshConsensus() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshCometNodeInfo() {
-	defer a.HandlePanic()
-
-	a.RefreshCometNodeInfo()
-
-	ticker := time.NewTicker(a.Config.ChainInfoRefreshRate)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-ticker.C:
-			a.RefreshCometNodeInfo()
-		}
-	}
-}
-
 func (a *App) RefreshCometNodeInfo() {
 	if a.IsPaused.Load() {
 		return
@@ -414,24 +390,6 @@ func (a *App) RefreshCometNodeInfo() {
 	a.State.SetChainInfo(nodeStatus)
 	a.State.SetChainInfoError(err)
 	a.DisplayWrapper.SetState(a.State)
-}
-
-func (a *App) GoRefreshUpgrade() {
-	defer a.HandlePanic()
-
-	a.RefreshUpgrade()
-
-	ticker := time.NewTicker(a.Config.UpgradeRefreshRate)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-ticker.C:
-			a.RefreshUpgrade()
-		}
-	}
 }
 
 func (a *App) RefreshUpgrade() {
@@ -463,24 +421,6 @@ func (a *App) RefreshUpgrade() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshBlockTime() {
-	defer a.HandlePanic()
-
-	a.RefreshBlockTime()
-
-	ticker := time.NewTicker(a.Config.BlockTimeRefreshRate)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-ticker.C:
-			a.RefreshBlockTime()
-		}
-	}
-}
-
 func (a *App) RefreshBlockTime() {
 	if a.IsPaused.Load() {
 		return
@@ -494,24 +434,6 @@ func (a *App) RefreshBlockTime() {
 
 	a.State.SetBlockTime(blockTime)
 	a.DisplayWrapper.SetState(a.State)
-}
-
-func (a *App) GoRefreshNetInfo() {
-	defer a.HandlePanic()
-
-	a.RefreshNetInfo()
-
-	ticker := time.NewTicker(a.Config.RefreshRate)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-ticker.C:
-			a.RefreshNetInfo()
-		}
-	}
 }
 
 func (a *App) RefreshNetInfo() {
