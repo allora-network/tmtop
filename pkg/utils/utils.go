@@ -5,10 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"math"
-	"strconv"
 	"time"
-
-	loggerPkg "main/pkg/logger"
 
 	"github.com/btcsuite/btcutil/bech32"
 	"github.com/cometbft/cometbft/crypto"
@@ -31,15 +28,6 @@ func ValidatorAddr(pubkeyBytes []byte) string {
 	pubkey := comet_secp256k1.PubKey(pubkeyBytes)
 	pubKeyConvertedToAddress := sdk.ValAddress(pubkey.Address().Bytes())
 	return pubKeyConvertedToAddress.String()
-}
-
-func MustParseInt64(source string) int64 {
-	result, err := strconv.ParseInt(source, 10, 64)
-	if err != nil {
-		loggerPkg.GetDefaultLogger().Fatal().Str("value", source).Msg("Could not parse int64")
-	}
-
-	return result
 }
 
 func ZeroOrPositiveDuration(duration time.Duration) time.Duration {
