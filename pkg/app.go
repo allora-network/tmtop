@@ -31,7 +31,7 @@ type App struct {
 	Logger         zerolog.Logger
 	Version        string
 	Config         *configPkg.Config
-	DisplayWrapper *display.Wrapper
+	DisplayWrapper display.Display
 	State          *types.State
 	LogChannel     chan string
 
@@ -147,7 +147,9 @@ func (a *App) Start() {
 	// Periodic retention cleanup — nop impl runs a cheap no-op loop.
 	go a.databaseCleanupRoutine()
 
-	a.DisplayWrapper.Start()
+	if err := a.DisplayWrapper.Start(); err != nil {
+		a.Logger.Error().Err(err).Msg("display exited with error")
+	}
 }
 
 func (a *App) ServeTopology() {
@@ -533,12 +535,11 @@ func (a *App) HandlePanic() {
 
 // shutdown performs graceful shutdown with terminal cleanup.
 func (a *App) shutdown() {
-	// Stop the tview application first
-	if a.DisplayWrapper != nil && a.DisplayWrapper.App != nil {
-		a.DisplayWrapper.App.Stop()
+	if a.DisplayWrapper != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = a.DisplayWrapper.Stop(ctx)
 	}
-
-	// Run all registered cleanup functions
 	a.restoreTerminal()
 }
 

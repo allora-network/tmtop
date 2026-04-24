@@ -1,6 +1,7 @@
 package display
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -164,7 +165,7 @@ func NewWrapper(
 	}
 }
 
-func (w *Wrapper) Start() {
+func (w *Wrapper) Start() error {
 	w.RPCsTable.SetSelectedFunc(func(row, col int) {
 		rpc, ok := w.State.RPCAtIndex(row)
 		if ok {
@@ -254,7 +255,20 @@ func (w *Wrapper) Start() {
 	if err := w.App.Run(); err != nil {
 		w.Logger.Error().Err(err).Msg("Could not draw screen")
 		w.cleanup()
+		return err
 	}
+	return nil
+}
+
+// Stop asks the tview application to exit. The context is accepted
+// for interface symmetry with other components but tview's Stop is
+// synchronous.
+func (w *Wrapper) Stop(_ context.Context) error {
+	if w.App != nil {
+		w.App.Stop()
+	}
+	w.restoreTerminal()
+	return nil
 }
 
 func (w *Wrapper) ToggleDebug() {
