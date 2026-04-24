@@ -123,7 +123,7 @@ func NewApp(config *configPkg.Config, version string) *App {
 func (a *App) Start() {
 	// Check if analytics mode is enabled
 	if a.Config.AnalyticsMode {
-		a.runAnalyticsMode()
+		analytics.Run(a.Config, a.DB, a.Logger)
 		return
 	}
 
@@ -648,81 +648,3 @@ func (a *App) databaseCleanupRoutine() {
 	}
 }
 
-// runAnalyticsMode runs the application in analytics mode.
-func (a *App) runAnalyticsMode() {
-	if a.DB == nil {
-		fmt.Printf("Error: Analytics mode requires database to be enabled. Use --database-path flag.\n")
-		os.Exit(1)
-	}
-
-	cliAnalytics := analytics.NewCLIAnalytics(a.DB, a.Logger)
-	ctx := context.Background()
-
-	switch a.Config.AnalyticsCommand {
-	case "performance":
-		if a.Config.AnalyticsValidator == "" {
-			fmt.Printf("Error: --analytics-validator is required for performance analysis\n")
-			os.Exit(1)
-		}
-
-		err := cliAnalytics.PrintValidatorPerformance(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
-		if err != nil {
-			fmt.Printf("Error running performance analysis: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "rankings":
-		err := cliAnalytics.PrintValidatorRankings(ctx, a.Config.AnalyticsTimeWindow, 20)
-		if err != nil {
-			fmt.Printf("Error running rankings analysis: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "timeseries":
-		if a.Config.AnalyticsValidator == "" {
-			fmt.Printf("Error: --analytics-validator is required for time series analysis\n")
-			os.Exit(1)
-		}
-
-		err := cliAnalytics.PrintPerformanceTimeSeries(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
-		if err != nil {
-			fmt.Printf("Error running time series analysis: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "debug":
-		err := cliAnalytics.PrintDatabaseSummary(ctx)
-		if err != nil {
-			fmt.Printf("Error running database debug: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "diagnose":
-		if a.Config.AnalyticsValidator == "" {
-			fmt.Printf("Error: --analytics-validator is required for validator diagnosis\n")
-			os.Exit(1)
-		}
-
-		err := cliAnalytics.DiagnoseValidator(ctx, a.Config.AnalyticsValidator, a.Config.AnalyticsTimeWindow)
-		if err != nil {
-			fmt.Printf("Error running validator diagnosis: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "search":
-		if a.Config.AnalyticsValidator == "" {
-			fmt.Printf("Error: --analytics-validator is required as search term for validator search\n")
-			os.Exit(1)
-		}
-
-		err := cliAnalytics.SearchValidators(ctx, a.Config.AnalyticsValidator)
-		if err != nil {
-			fmt.Printf("Error running validator search: %v\n", err)
-			os.Exit(1)
-		}
-
-	default:
-		fmt.Printf("Error: Unknown analytics command '%s'. Available commands: performance, rankings, timeseries, debug, diagnose, search\n", a.Config.AnalyticsCommand)
-		os.Exit(1)
-	}
-}
