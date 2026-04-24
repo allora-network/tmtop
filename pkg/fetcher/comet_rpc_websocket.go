@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	butils "github.com/brynbellomy/go-utils"
@@ -22,12 +23,12 @@ type CometRPCWebsocket struct {
 	conn   *websocket.Conn
 	muConn *sync.Mutex
 
-	subIDNonce int
+	subIDNonce atomic.Int64
 	subs       *butils.SyncMap[int, sub]
 
-	chResetConn chan struct{}
-	chStop      chan struct{}
-	wgDone      *sync.WaitGroup
+	chStop    chan struct{}
+	closeOnce sync.Once
+	wgDone    *sync.WaitGroup
 }
 
 type sub struct {
@@ -52,14 +53,12 @@ func NewCometRPCWebsocket(rpcURL string, logger zerolog.Logger) *CometRPCWebsock
 	url := u.String() + "/websocket"
 
 	ws := &CometRPCWebsocket{
-		url:         url,
-		logger:      cometLogger,
-		muConn:      &sync.Mutex{},
-		subIDNonce:  0,
-		subs:        butils.NewSyncMap[int, sub](),
-		chResetConn: make(chan struct{}, 1),
-		chStop:      make(chan struct{}),
-		wgDone:      &sync.WaitGroup{},
+		url:    url,
+		logger: cometLogger,
+		muConn: &sync.Mutex{},
+		subs:   butils.NewSyncMap[int, sub](),
+		chStop: make(chan struct{}),
+		wgDone: &sync.WaitGroup{},
 	}
 
 	ws.resetConnection()
@@ -71,7 +70,9 @@ func NewCometRPCWebsocket(rpcURL string, logger zerolog.Logger) *CometRPCWebsock
 }
 
 func (ws *CometRPCWebsocket) Close() {
-	ws.chStop <- struct{}{}
+	ws.closeOnce.Do(func() {
+		close(ws.chStop)
+	})
 	ws.wgDone.Wait()
 }
 
@@ -127,7 +128,12 @@ func (ws *CometRPCWebsocket) readConnection() {
 			continue
 		}
 
-		subID := int(resp.ID.(jsonrpctypes.JSONRPCIntID))
+		intID, ok := resp.ID.(jsonrpctypes.JSONRPCIntID)
+		if !ok {
+			ws.logger.Error().Msgf("received response with unexpected ID type %T", resp.ID)
+			continue
+		}
+		subID := int(intID)
 		sub, ok := ws.subs.Get(subID)
 		if !ok {
 			ws.logger.Error().Msgf("received event for unknown subscription ID %d", subID)
@@ -180,10 +186,10 @@ func (ws *CometRPCWebsocket) resetConnection() {
 
 	ws.logger.Info().Str("url", ws.conn.RemoteAddr().String()).Msg("connected to comet rpc websocket")
 
-	// resubscribe to everything
+	// resubscribe to everything (caller holds muConn)
 	for _, sub := range ws.subs.Iter() {
 		ws.logger.Debug().Msgf("subscribing to subscription ID %d with events %v", sub.id, sub.events)
-		ws.sendSubscribeMsg(sub)
+		ws.sendSubscribeMsgLocked(sub)
 	}
 }
 
@@ -204,19 +210,21 @@ func (ws *CometRPCWebsocket) terminateConnection() {
 }
 
 func (ws *CometRPCWebsocket) Subscribe(mb *butils.Mailbox[ctypes.TMEventData], events ...string) {
-	ws.subIDNonce++
-
 	sub := sub{
-		id:     ws.subIDNonce,
+		id:     int(ws.subIDNonce.Add(1)),
 		events: events,
 		mb:     mb,
 	}
 
 	ws.subs.Set(sub.id, sub)
-	ws.sendSubscribeMsg(sub)
+
+	ws.muConn.Lock()
+	defer ws.muConn.Unlock()
+	ws.sendSubscribeMsgLocked(sub)
 }
 
-func (ws *CometRPCWebsocket) sendSubscribeMsg(sub sub) {
+// sendSubscribeMsgLocked writes a subscription message. Caller must hold ws.muConn.
+func (ws *CometRPCWebsocket) sendSubscribeMsgLocked(sub sub) {
 	subMsg := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "subscribe",
