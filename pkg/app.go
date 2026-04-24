@@ -36,9 +36,9 @@ type App struct {
 	LogChannel     chan string
 
 	DB             *db.DB
-	ConsensusStore *db.ConsensusStore
+	ConsensusStore db.ConsensusStorer
 
-	DataFetcher *fetcher.DataFetcher
+	DataFetcher fetcher.Fetcher
 
 	mbRPCURLs        *butils.Mailbox[string]
 	rpcURLsLastFetch map[string]time.Time
@@ -60,9 +60,10 @@ func NewApp(config *configPkg.Config, version string) *App {
 
 	state := types.NewState(config.RPCHost, logger)
 
-	// Initialize database if configured
+	// Initialize database if configured. When disabled, ConsensusStore
+	// is a no-op so the rest of the app never needs to nil-check.
 	var database *db.DB
-	var consensusStore *db.ConsensusStore
+	var consensusStore db.ConsensusStorer = db.NopConsensusStore{}
 
 	if config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
 		dbPath := config.DatabasePath
@@ -89,7 +90,7 @@ func NewApp(config *configPkg.Config, version string) *App {
 			logger.Fatal().Err(err).Msg("failed to initialize database")
 		}
 
-		consensusStore = db.NewConsensusStore(database, logger)
+		consensusStore = db.NewConsensusStore(database, dbConfig, logger)
 		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
 
@@ -120,14 +121,12 @@ func (a *App) Start() {
 	// Set up terminal cleanup on exit
 	defer a.restoreTerminal()
 
-	// Set up database cleanup on exit
-	if a.DB != nil {
-		defer func() {
-			if err := a.DB.Close(); err != nil {
-				a.Logger.Error().Err(err).Msg("Failed to close database")
-			}
-		}()
-	}
+	// Close the consensus store on exit. Nop impl when persistence disabled.
+	defer func() {
+		if err := a.ConsensusStore.Close(); err != nil {
+			a.Logger.Error().Err(err).Msg("Failed to close consensus store")
+		}
+	}()
 
 	if a.Config.WithTopologyAPI {
 		go a.ServeTopology()
@@ -145,10 +144,8 @@ func (a *App) Start() {
 	go a.DisplayLogs()
 	go a.ListenForPause()
 
-	// Start database cleanup routine if database is enabled
-	if a.DB != nil && a.ConsensusStore != nil {
-		go a.databaseCleanupRoutine()
-	}
+	// Periodic retention cleanup — nop impl runs a cheap no-op loop.
+	go a.databaseCleanupRoutine()
 
 	a.DisplayWrapper.Start()
 }
@@ -303,16 +300,13 @@ func (a *App) RefreshConsensus() {
 	a.State.SetTMValidators(vals)
 	a.State.SetConsensusStateError(nil)
 
-	// Persist to database if available
-	if a.ConsensusStore != nil && consensus != nil {
+	if consensus != nil {
 		ctx := context.Background()
 
-		// Store validators and height information
 		if err := a.ConsensusStore.StoreValidators(ctx, consensus.Height, vals); err != nil {
 			a.Logger.Error().Err(err).Int64("height", consensus.Height).Msg("Failed to persist validators to database")
 		}
 
-		// Store round data from current state
 		for hr, roundData := range a.State.VotesByRound.Iter() {
 			if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, vals); err != nil {
 				a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
@@ -503,8 +497,7 @@ func (a *App) SubscribeCometBFT() {
 			events := mbEvents.RetrieveAll()
 			a.State.AddCometBFTEvents(events)
 
-			// Persist events to database if available
-			if a.ConsensusStore != nil && len(events) > 0 {
+			if len(events) > 0 {
 				ctx := context.Background()
 				if err := a.ConsensusStore.StoreCometBFTEvents(ctx, events, a.State.GetTMValidators()); err != nil {
 					a.Logger.Error().Err(err).Msg("Failed to persist CometBFT events to database")
@@ -582,33 +575,21 @@ func (a *App) addCleanupFunc(fn func()) {
 	a.cleanupFuncs = append(a.cleanupFuncs, fn)
 }
 
-// databaseCleanupRoutine runs periodic database cleanup.
+// databaseCleanupRoutine runs periodic retention cleanup.
 func (a *App) databaseCleanupRoutine() {
-	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
+	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	// Run initial cleanup
 	ctx := context.Background()
-	if err := a.DB.CleanupOldData(ctx, db.Config{
-		DatabasePath:    a.Config.DatabasePath,
-		MaxRetainBlocks: a.Config.MaxRetainBlocks,
-		MaxRetainDays:   a.Config.MaxRetainDays,
-	}); err != nil {
+	if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
 		a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
 	}
 
-	for {
-		select {
-		case <-ticker.C:
-			if err := a.DB.CleanupOldData(ctx, db.Config{
-				DatabasePath:    a.Config.DatabasePath,
-				MaxRetainBlocks: a.Config.MaxRetainBlocks,
-				MaxRetainDays:   a.Config.MaxRetainDays,
-			}); err != nil {
-				a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
-			} else {
-				a.Logger.Debug().Msg("Database cleanup completed successfully")
-			}
+	for range ticker.C {
+		if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
+			a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
+		} else {
+			a.Logger.Debug().Msg("Database cleanup completed successfully")
 		}
 	}
 }

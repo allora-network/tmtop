@@ -19,15 +19,28 @@ import (
 // ConsensusStore handles persistence of consensus data.
 type ConsensusStore struct {
 	db     *DB
+	config Config
 	logger zerolog.Logger
 }
 
 // NewConsensusStore creates a new consensus store.
-func NewConsensusStore(db *DB, logger zerolog.Logger) *ConsensusStore {
+func NewConsensusStore(db *DB, config Config, logger zerolog.Logger) *ConsensusStore {
 	return &ConsensusStore{
 		db:     db,
+		config: config,
 		logger: logger.With().Str("component", "consensus_store").Logger(),
 	}
+}
+
+// CleanupOldData delegates to the underlying DB using the retention
+// settings supplied at construction time.
+func (cs *ConsensusStore) CleanupOldData(ctx context.Context) error {
+	return cs.db.CleanupOldData(ctx, cs.config)
+}
+
+// Close closes the underlying database connection.
+func (cs *ConsensusStore) Close() error {
+	return cs.db.Close()
 }
 
 // StoreRoundData persists round data from RoundDataMap.
