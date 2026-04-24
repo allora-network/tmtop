@@ -1,14 +1,11 @@
 package types
 
 import (
-	"fmt"
 	"maps"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
-
-	"main/pkg/utils"
 
 	butils "github.com/brynbellomy/go-utils"
 	cptypes "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -211,166 +208,6 @@ func (s *State) SetUpgradePlanError(err error) {
 func (s *State) SetChainInfoError(err error) {
 	s.ChainInfoError = err
 }
-
-func (s *State) SerializeConsensus(timezone *time.Location) string {
-	if s.ConsensusStateError != nil {
-		return fmt.Sprintf(" consensus state error: %s", s.ConsensusStateError)
-	}
-
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf(" height=%d round=%d step=%d\n", s.Height, s.Round, s.Step))
-	sb.WriteString(fmt.Sprintf(
-		" block time: %s (%s)\n",
-		utils.ZeroOrPositiveDuration(utils.SerializeDuration(time.Since(s.StartTime))),
-		utils.SerializeTime(s.StartTime.In(timezone)),
-	))
-
-	sb.WriteString(fmt.Sprintf(
-		" prevote consensus (total/agreeing): %.2f / %.2f\n",
-		s.GetTotalVotingPowerPrevotedPercent(true),
-		s.GetTotalVotingPowerPrevotedPercent(false),
-	))
-	sb.WriteString(fmt.Sprintf(
-		" precommit consensus (total/agreeing): %.2f / %.2f\n",
-		s.GetTotalVotingPowerPrecommittedPercent(true),
-		s.GetTotalVotingPowerPrecommittedPercent(false),
-	))
-
-	sb.WriteString(fmt.Sprintf(" last updated at: %s\n", utils.SerializeTime(time.Now().In(timezone))))
-
-	return sb.String()
-}
-
-func (s *State) SerializeChainInfo(timezone *time.Location) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf(" rpc: %v\n", s.CurrentRPC().URL))
-	sb.WriteString(fmt.Sprintf(" (%v)\n\n", s.CurrentRPC().Moniker))
-
-	if s.ChainInfoError != nil {
-		sb.WriteString(fmt.Sprintf(" chain info fetch error: %s\n", s.ChainInfoError.Error()))
-	} else if s.ChainInfo != nil {
-		sb.WriteString(fmt.Sprintf(" chain name: %s\n", s.ChainInfo.NodeInfo.Network))
-		sb.WriteString(fmt.Sprintf(" tendermint version: v%s\n", s.ChainInfo.NodeInfo.Version))
-
-		if s.BlockTime != 0 {
-			sb.WriteString(fmt.Sprintf(" avg block time: %s\n", utils.SerializeDuration(s.BlockTime)))
-		}
-	}
-
-	if s.UpgradePlanError != nil {
-		sb.WriteString(fmt.Sprintf(" upgrade plan fetch error: %s\n", s.UpgradePlanError))
-	} else if s.Upgrade == nil {
-		sb.WriteString(" no chain upgrade scheduled\n")
-	} else {
-		sb.WriteString(s.SerializeUpgradeInfo(timezone))
-	}
-
-	return sb.String()
-}
-
-func (s *State) SerializeUpgradeInfo(timezone *time.Location) string {
-	var sb strings.Builder
-
-	if s.Upgrade.Height+1 == s.Height {
-		sb.WriteString(" upgrade in progress...\n")
-		return sb.String()
-	}
-
-	if s.Upgrade.Height+1 < s.Height {
-		sb.WriteString(fmt.Sprintf(
-			" chain upgrade %s applied at block %d\n",
-			s.Upgrade.Name,
-			s.Upgrade.Height,
-		))
-
-		sb.WriteString(fmt.Sprintf(
-			" blocks since upgrade: %d\n",
-			s.Height-s.Upgrade.Height,
-		))
-
-		if s.BlockTime == 0 {
-			return sb.String()
-		}
-
-		upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
-		sb.WriteString(fmt.Sprintf(
-			" time since upgrade: %s\n",
-			utils.SerializeDuration(time.Since(upgradeTime)),
-		))
-
-		sb.WriteString(fmt.Sprintf(" upgrade approximate time: %s\n", utils.SerializeTime(upgradeTime.In(timezone))))
-		return sb.String()
-	}
-
-	sb.WriteString(fmt.Sprintf(
-		" chain upgrade %s scheduled at block %d\n",
-		s.Upgrade.Name,
-		s.Upgrade.Height,
-	))
-
-	sb.WriteString(fmt.Sprintf(
-		" blocks till upgrade: %d\n",
-		s.Upgrade.Height-s.Height,
-	))
-
-	if s.BlockTime == 0 {
-		return sb.String()
-	}
-
-	upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
-
-	sb.WriteString(fmt.Sprintf(
-		" time till upgrade: %s\n",
-		utils.SerializeDuration(time.Until(upgradeTime)),
-	))
-
-	sb.WriteString(fmt.Sprintf(" upgrade estimated time: %s\n", utils.SerializeTime(upgradeTime.In(timezone))))
-
-	return sb.String()
-}
-
-func (s *State) SerializeProgressbar(width int, height int, prefix string, progress int) string {
-	progressBar := ProgressBar{
-		Width:    width,
-		Height:   height,
-		Progress: progress,
-		Prefix:   prefix,
-	}
-
-	return progressBar.Serialize()
-}
-
-func (s *State) SerializePrevotesProgressbar(width int, height int) string {
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	prevotePercent := s.GetTotalVotingPowerPrevotedPercent(true)
-	prevotePercentFloat, _ := prevotePercent.Float64()
-	prevotePercentInt := int(prevotePercentFloat)
-
-	return s.SerializeProgressbar(width, height, "Prevotes: ", prevotePercentInt)
-}
-
-func (s *State) SerializePrecommitsProgressbar(width int, height int) string {
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	precommitPercent := s.GetTotalVotingPowerPrecommittedPercent(true)
-	precommitPercentFloat, _ := precommitPercent.Float64()
-	precommitPercentInt := int(precommitPercentFloat)
-
-	return s.SerializeProgressbar(width, height, "Precommits: ", precommitPercentInt)
-}
-
-// TMValidator-based methods
 
 // GetTMValidators returns the unified validator collection.
 func (s *State) GetTMValidators() TMValidators {

@@ -303,13 +303,13 @@ func (w *Wrapper) SetState(state *types.State) {
 		w.ConsensusInfoTextView.Clear()
 		w.ChainInfoTextView.Clear()
 		w.ProgressTextView.Clear()
-		_, _ = fmt.Fprint(w.ConsensusInfoTextView, state.SerializeConsensus(w.Timezone))
-		_, _ = fmt.Fprint(w.ChainInfoTextView, state.SerializeChainInfo(w.Timezone))
+		_, _ = fmt.Fprint(w.ConsensusInfoTextView, SerializeConsensus(state, w.Timezone))
+		_, _ = fmt.Fprint(w.ChainInfoTextView, SerializeChainInfo(state, w.Timezone))
 
 		_, _, width, height := w.ConsensusInfoTextView.GetInnerRect()
-		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrevotesProgressbar(width, height/2))
+		_, _ = fmt.Fprint(w.ProgressTextView, SerializePrevotesProgressbar(state, width, height/2))
 		_, _ = fmt.Fprint(w.ProgressTextView, "\n")
-		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrecommitsProgressbar(width, height/2))
+		_, _ = fmt.Fprint(w.ProgressTextView, SerializePrecommitsProgressbar(state, width, height/2))
 
 		// w.App.Draw()
 	})
