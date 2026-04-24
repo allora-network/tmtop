@@ -43,15 +43,13 @@ type App struct {
 	mbRPCURLs        *butils.Mailbox[string]
 	rpcURLsLastFetch map[string]time.Time
 
-	PauseChannel chan bool
-	IsPaused     atomic.Bool
+	IsPaused atomic.Bool
 
 	cleanupFuncs []func()
 }
 
 func NewApp(config *configPkg.Config, version string) *App {
 	mbLogs := butils.NewMailbox[string](1000)
-	pauseChannel := make(chan bool)
 
 	logger := loggerPkg.GetLogger(mbLogs, config).
 		With().
@@ -94,11 +92,10 @@ func NewApp(config *configPkg.Config, version string) *App {
 		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
 
-	return &App{
+	app := &App{
 		Logger:           logger,
 		Version:          version,
 		Config:           config,
-		DisplayWrapper:   display.NewWrapper(config, state, logger, pauseChannel, version),
 		State:            state,
 		mbLogs:           mbLogs,
 		DB:               database,
@@ -106,9 +103,12 @@ func NewApp(config *configPkg.Config, version string) *App {
 		DataFetcher:      fetcher.NewDataFetcher(config, state, logger),
 		mbRPCURLs:        butils.NewMailbox[string](1000),
 		rpcURLsLastFetch: make(map[string]time.Time),
-		PauseChannel:     pauseChannel,
 		cleanupFuncs:     make([]func(), 0),
 	}
+	// Display needs a pointer to the pause flag so its input handler
+	// can toggle it in-place.
+	app.DisplayWrapper = display.NewWrapper(config, state, logger, &app.IsPaused, version)
+	return app
 }
 
 func (a *App) Start() {
@@ -141,7 +141,6 @@ func (a *App) Start() {
 	go a.GoRefreshNetInfo()
 	go a.SubscribeCometBFT()
 	go a.DisplayLogs()
-	go a.ListenForPause()
 
 	// Periodic retention cleanup — nop impl runs a cheap no-op loop.
 	go a.databaseCleanupRoutine()
@@ -515,13 +514,6 @@ func (a *App) DisplayLogs() {
 		for _, line := range a.mbLogs.RetrieveAll() {
 			a.DisplayWrapper.DebugText(line)
 		}
-	}
-}
-
-func (a *App) ListenForPause() {
-	for {
-		paused := <-a.PauseChannel
-		a.IsPaused.Store(paused)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	configPkg "main/pkg/config"
@@ -55,8 +56,7 @@ type Wrapper struct {
 	State  *types.State
 	Logger zerolog.Logger
 
-	PauseChannel chan bool
-	IsPaused     bool
+	paused *atomic.Bool
 
 	IsRPCListDisplayed bool
 	IsHelpDisplayed    bool
@@ -70,7 +70,7 @@ func NewWrapper(
 	config *configPkg.Config,
 	state *types.State,
 	logger zerolog.Logger,
-	pauseChannel chan bool,
+	paused *atomic.Bool,
 	appVersion string,
 ) *Wrapper {
 	lastRoundTableData := NewLastRoundTableData(DefaultColumnsCount, config.DisableEmojis, false)
@@ -156,8 +156,7 @@ func NewWrapper(
 		InfoBlockWidth:        2,
 		ColumnsCount:          DefaultColumnsCount,
 		Mode:                  DefaultMode,
-		PauseChannel:          pauseChannel,
-		IsPaused:              false,
+		paused:                paused,
 		IsHelpDisplayed:       false,
 		DisableEmojis:         config.DisableEmojis,
 		Transpose:             false,
@@ -217,8 +216,7 @@ func (w *Wrapper) Start() error {
 		}
 
 		if event.Rune() == 'p' {
-			w.IsPaused = !w.IsPaused
-			w.PauseChannel <- w.IsPaused
+			w.paused.Store(!w.paused.Load())
 		}
 
 		if event.Key() == tcell.KeyTAB {
