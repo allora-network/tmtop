@@ -411,23 +411,7 @@ func (a *App) RefreshCometNodeInfo() {
 		return
 	}
 
-	a.State.SetChainInfo(&types.CometNodeStatus{
-		NodeInfo: types.CometNodeInfo{
-			ID:      string(nodeStatus.NodeInfo.DefaultNodeID),
-			Version: nodeStatus.NodeInfo.Version,
-			Network: nodeStatus.NodeInfo.Network,
-			Moniker: nodeStatus.NodeInfo.Moniker,
-			Other: struct {
-				RPCAddress string `json:"rpc_address"`
-			}{
-				RPCAddress: nodeStatus.NodeInfo.Other.RPCAddress,
-			},
-		},
-		ValidatorInfo: types.CometValidatorInfo{
-			Address:     nodeStatus.ValidatorInfo.Address.String(),
-			VotingPower: fmt.Sprintf("%d", nodeStatus.ValidatorInfo.VotingPower),
-		},
-	})
+	a.State.SetChainInfo(nodeStatus)
 	a.State.SetChainInfoError(err)
 	a.DisplayWrapper.SetState(a.State)
 }

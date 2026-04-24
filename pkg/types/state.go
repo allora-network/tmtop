@@ -12,6 +12,7 @@ import (
 
 	butils "github.com/brynbellomy/go-utils"
 	cptypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	rpctypes "github.com/cometbft/cometbft/rpc/core/types"
 	ctypes "github.com/cometbft/cometbft/types"
 	"github.com/rs/zerolog"
 )
@@ -27,7 +28,7 @@ type State struct {
 	TMValidators       TMValidators
 	validatorsByPeerID map[string]TMValidator
 
-	ChainInfo *CometNodeStatus
+	ChainInfo *rpctypes.ResultStatus
 	Upgrade   *Upgrade
 	BlockTime time.Duration
 	NetInfo   *NetInfo
@@ -179,7 +180,7 @@ func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
 	}
 }
 
-func (s *State) SetChainInfo(info *CometNodeStatus) {
+func (s *State) SetChainInfo(info *rpctypes.ResultStatus) {
 	s.ChainInfo = info
 }
 
