@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -70,31 +71,35 @@ func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 }
 
 func (c *Client) Get(relativeURL string, target any) error {
+	fullURL := c.join(c.Host, relativeURL)
+
 	body, err := c.GetInternal(relativeURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("GET %s: %w", fullURL, err)
 	}
 
 	if err := json.NewDecoder(body).Decode(target); err != nil {
-		return err
+		return fmt.Errorf("decoding JSON from %s: %w", fullURL, err)
 	}
 
 	return body.Close()
 }
 
 func (c *Client) GetPlain(relativeURL string) ([]byte, error) {
+	fullURL := c.join(c.Host, relativeURL)
+
 	body, err := c.GetInternal(relativeURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GET %s: %w", fullURL, err)
 	}
 
 	bytes, err := io.ReadAll(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading body from %s: %w", fullURL, err)
 	}
 
 	if err := body.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("closing body from %s: %w", fullURL, err)
 	}
 
 	return bytes, nil

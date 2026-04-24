@@ -52,21 +52,24 @@ func (rpc *CometRPC) client() *http.Client {
 }
 
 func (rpc *CometRPC) request(path string, target any) error {
+	url := rpc.getURL()
 	bs, err := rpc.client().GetPlain(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("GET %s%s: %w", url, path, err)
 	}
 
 	var response jsonrpctypes.RPCResponse
-	err = cmtjson.Unmarshal(bs, &response)
-	if err != nil {
-		return err
-	} else if response.Error != nil {
-		return response.Error
+	if err := cmtjson.Unmarshal(bs, &response); err != nil {
+		return fmt.Errorf("decoding JSON-RPC envelope from %s%s: %w", url, path, err)
+	}
+	if response.Error != nil {
+		return fmt.Errorf("JSON-RPC error from %s%s: %w", url, path, response.Error)
 	}
 
-	err = cmtjson.Unmarshal(response.Result, &target)
-	return err
+	if err := cmtjson.Unmarshal(response.Result, &target); err != nil {
+		return fmt.Errorf("decoding JSON-RPC result from %s%s: %w", url, path, err)
+	}
+	return nil
 }
 
 func (rpc *CometRPC) GetConsensusState() (*cnstypes.RoundState, error) {
