@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"main/pkg/analytics"
@@ -43,7 +44,7 @@ type App struct {
 	rpcURLsLastFetch map[string]time.Time
 
 	PauseChannel chan bool
-	IsPaused     bool
+	IsPaused     atomic.Bool
 
 	cleanupFuncs []func()
 }
@@ -63,8 +64,6 @@ func NewApp(config *configPkg.Config, version string) *App {
 	var database *db.DB
 	var consensusStore *db.ConsensusStore
 
-	fmt.Println("max retain days", config.MaxRetainDays)
-
 	if config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
 		dbPath := config.DatabasePath
 		if dbPath == "" {
@@ -78,8 +77,6 @@ func NewApp(config *configPkg.Config, version string) *App {
 			}
 		}
 
-		fmt.Println("Using database path:", dbPath)
-
 		dbConfig := db.Config{
 			DatabasePath:    dbPath,
 			MaxRetainBlocks: config.MaxRetainBlocks,
@@ -89,15 +86,12 @@ func NewApp(config *configPkg.Config, version string) *App {
 		var err error
 		database, err = db.New(dbConfig)
 		if err != nil {
-			fmt.Println("Failed to initialize database:", err)
-			os.Exit(-1)
+			logger.Fatal().Err(err).Msg("failed to initialize database")
 		}
 
 		consensusStore = db.NewConsensusStore(database, logger)
 		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
-
-	fmt.Println("DB:", database)
 
 	return &App{
 		Logger:           logger,
@@ -112,7 +106,6 @@ func NewApp(config *configPkg.Config, version string) *App {
 		mbRPCURLs:        butils.NewMailbox[string](1000),
 		rpcURLsLastFetch: make(map[string]time.Time),
 		PauseChannel:     pauseChannel,
-		IsPaused:         false,
 		cleanupFuncs:     make([]func(), 0),
 	}
 }
@@ -162,7 +155,8 @@ func (a *App) Start() {
 
 func (a *App) ServeTopology() {
 	_ = tmhttp.NewServer(
-		a.Config.TopologyListenAddr,
+		// a.Config.TopologyListenAddr,
+        ":8001",
 		topology.WithHTTPTopologyAPI(a.State),
 		topology.WithHTTPPeersAPI(a.State),
 		topology.WithHTTPDebugAPI(a.State),
@@ -268,7 +262,7 @@ func (a *App) GoRefreshConsensus() {
 }
 
 func (a *App) RefreshConsensus() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -348,7 +342,7 @@ func (a *App) GoRefreshCometNodeInfo() {
 }
 
 func (a *App) RefreshCometNodeInfo() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -360,7 +354,23 @@ func (a *App) RefreshCometNodeInfo() {
 		return
 	}
 
-	a.State.SetChainInfo(nodeStatus)
+	a.State.SetChainInfo(&types.CometNodeStatus{
+		NodeInfo: types.CometNodeInfo{
+			ID:      string(nodeStatus.NodeInfo.DefaultNodeID),
+			Version: nodeStatus.NodeInfo.Version,
+			Network: nodeStatus.NodeInfo.Network,
+			Moniker: nodeStatus.NodeInfo.Moniker,
+			Other: struct {
+				RPCAddress string `json:"rpc_address"`
+			}{
+				RPCAddress: nodeStatus.NodeInfo.Other.RPCAddress,
+			},
+		},
+		ValidatorInfo: types.CometValidatorInfo{
+			Address:     nodeStatus.ValidatorInfo.Address.String(),
+			VotingPower: fmt.Sprintf("%d", nodeStatus.ValidatorInfo.VotingPower),
+		},
+	})
 	a.State.SetChainInfoError(err)
 	a.DisplayWrapper.SetState(a.State)
 }
@@ -384,7 +394,7 @@ func (a *App) GoRefreshUpgrade() {
 }
 
 func (a *App) RefreshUpgrade() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -431,7 +441,7 @@ func (a *App) GoRefreshBlockTime() {
 }
 
 func (a *App) RefreshBlockTime() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -464,7 +474,7 @@ func (a *App) GoRefreshNetInfo() {
 }
 
 func (a *App) RefreshNetInfo() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -481,7 +491,7 @@ func (a *App) RefreshNetInfo() {
 func (a *App) SubscribeCometBFT() {
 	defer a.HandlePanic()
 
-	fmt.Println("connecting to websocket...")
+	a.Logger.Info().Msg("connecting to websocket")
 
 	mbEvents := butils.NewMailbox[ctypes.TMEventData](1000)
 	a.DataFetcher.Subscribe(mbEvents, "Vote")
@@ -516,7 +526,7 @@ func (a *App) DisplayLogs() {
 func (a *App) ListenForPause() {
 	for {
 		paused := <-a.PauseChannel
-		a.IsPaused = paused
+		a.IsPaused.Store(paused)
 	}
 }
 
