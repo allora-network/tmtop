@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"main/pkg"
@@ -35,6 +38,20 @@ func Execute(inputConfig configPkg.InputConfig, args []string, configFile string
 	}
 
 	app := pkg.NewApp(config, version)
+
+	// Trigger a graceful shutdown on SIGINT/SIGTERM. When tview owns
+	// the terminal the user will typically quit with 'q' or Ctrl+C
+	// (tview catches Ctrl+C itself), so this is mostly for kill
+	// signals from outside.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.Stop(ctx)
+	}()
+
 	app.Start()
 }
 

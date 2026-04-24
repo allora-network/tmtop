@@ -3,6 +3,7 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +41,16 @@ type App struct {
 
 	DataFetcher fetcher.Fetcher
 
+	topologyServer *tmhttp.Server
+
 	mbRPCURLs        *butils.Mailbox[string]
 	rpcURLsLastFetch map[string]time.Time
 
 	IsPaused atomic.Bool
+
+	chStop    chan struct{}
+	closeOnce sync.Once
+	wgDone    *sync.WaitGroup
 
 	cleanupFuncs []func()
 }
@@ -103,6 +110,8 @@ func NewApp(config *configPkg.Config, version string) *App {
 		DataFetcher:      fetcher.NewDataFetcher(config, state, logger),
 		mbRPCURLs:        butils.NewMailbox[string](1000),
 		rpcURLsLastFetch: make(map[string]time.Time),
+		chStop:           make(chan struct{}),
+		wgDone:           &sync.WaitGroup{},
 		cleanupFuncs:     make([]func(), 0),
 	}
 	// Display needs a pointer to the pause flag so its input handler
@@ -121,52 +130,106 @@ func (a *App) Start() {
 	// Set up terminal cleanup on exit
 	defer a.restoreTerminal()
 
-	// Close the consensus store on exit. Nop impl when persistence disabled.
-	defer func() {
-		if err := a.ConsensusStore.Close(); err != nil {
-			a.Logger.Error().Err(err).Msg("Failed to close consensus store")
-		}
-	}()
-
 	if a.Config.WithTopologyAPI {
-		go a.ServeTopology()
+		a.spawn(a.ServeTopology)
 	}
 
-	go a.CrawlRPCURLs()
+	a.spawn(a.CrawlRPCURLs)
 
-	go a.GoRefreshConsensus()
-	go a.GoRefreshCometNodeInfo()
-	go a.GoRefreshUpgrade()
-	go a.GoRefreshBlockTime()
-	go a.GoRefreshNetInfo()
-	go a.SubscribeCometBFT()
-	go a.DisplayLogs()
+	a.spawn(a.GoRefreshConsensus)
+	a.spawn(a.GoRefreshCometNodeInfo)
+	a.spawn(a.GoRefreshUpgrade)
+	a.spawn(a.GoRefreshBlockTime)
+	a.spawn(a.GoRefreshNetInfo)
+	a.spawn(a.SubscribeCometBFT)
+	a.spawn(a.DisplayLogs)
+	a.spawn(a.databaseCleanupRoutine)
 
-	// Periodic retention cleanup — nop impl runs a cheap no-op loop.
-	go a.databaseCleanupRoutine()
-
+	// Display blocks until the user quits.
 	if err := a.DisplayWrapper.Start(); err != nil {
 		a.Logger.Error().Err(err).Msg("display exited with error")
 	}
+
+	// User requested exit — shut everything else down.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Stop(ctx); err != nil {
+		a.Logger.Error().Err(err).Msg("shutdown incomplete")
+	}
+}
+
+// spawn runs fn as a tracked goroutine. Every goroutine launched by
+// the App must go through this so Stop can wait on wgDone.
+func (a *App) spawn(fn func()) {
+	a.wgDone.Add(1)
+	go func() {
+		defer a.wgDone.Done()
+		fn()
+	}()
+}
+
+// Stop signals all background goroutines to exit and waits for them,
+// bounded by ctx. Shutdown order: websocket/HTTP producers first (so
+// they stop writing State and DB), then the consensus store.
+func (a *App) Stop(ctx context.Context) error {
+	a.closeOnce.Do(func() {
+		close(a.chStop)
+	})
+
+	// Stop the websocket producer before we stop the consumer goroutines.
+	if err := a.DataFetcher.Close(ctx); err != nil {
+		a.Logger.Error().Err(err).Msg("DataFetcher close error")
+	}
+
+	// Stop the topology HTTP server if it's running.
+	if a.topologyServer != nil {
+		if err := a.topologyServer.Shutdown(ctx); err != nil {
+			a.Logger.Error().Err(err).Msg("topology server shutdown error")
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.wgDone.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		a.Logger.Error().Msg("shutdown timed out — some goroutines may still be running")
+	}
+
+	// Flush the consensus store last, after all writers have stopped.
+	if err := a.ConsensusStore.Close(); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to close consensus store")
+	}
+	return nil
 }
 
 func (a *App) ServeTopology() {
-	_ = tmhttp.NewServer(
+	a.topologyServer = tmhttp.NewServer(
 		// a.Config.TopologyListenAddr,
-        ":8001",
+		":8001",
 		topology.WithHTTPTopologyAPI(a.State),
 		topology.WithHTTPPeersAPI(a.State),
 		topology.WithHTTPDebugAPI(a.State),
 		topology.WithFrontendStaticAssets(),
-	).Serve()
+	)
+	if err := a.topologyServer.Serve(); err != nil && err != http.ErrServerClosed {
+		a.Logger.Error().Err(err).Msg("topology server error")
+	}
 }
 
 func (a *App) CrawlRPCURLs() {
 	a.mbRPCURLs.Deliver(a.Config.RPCHost)
-	timer := time.NewTimer(15 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
+		case <-a.chStop:
+			return
 		case <-a.mbRPCURLs.Notify():
 			var wg sync.WaitGroup
 			for _, url := range a.mbRPCURLs.RetrieveAll() {
@@ -183,7 +246,7 @@ func (a *App) CrawlRPCURLs() {
 			}
 			wg.Wait()
 
-		case <-timer.C:
+		case <-ticker.C:
 			for _, rpc := range a.State.KnownRPCs().Iter() {
 				if time.Since(a.rpcURLsLastFetch[rpc.URL]) >= 15*time.Second {
 					a.mbRPCURLs.Deliver(rpc.URL)
@@ -246,11 +309,11 @@ func (a *App) GoRefreshConsensus() {
 	a.RefreshConsensus()
 
 	ticker := time.NewTicker(a.Config.RefreshRate)
-	done := make(chan bool)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-done:
+		case <-a.chStop:
 			return
 		case <-ticker.C:
 			a.RefreshConsensus()
@@ -323,11 +386,11 @@ func (a *App) GoRefreshCometNodeInfo() {
 	a.RefreshCometNodeInfo()
 
 	ticker := time.NewTicker(a.Config.ChainInfoRefreshRate)
-	done := make(chan bool)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-done:
+		case <-a.chStop:
 			return
 		case <-ticker.C:
 			a.RefreshCometNodeInfo()
@@ -375,11 +438,11 @@ func (a *App) GoRefreshUpgrade() {
 	a.RefreshUpgrade()
 
 	ticker := time.NewTicker(a.Config.UpgradeRefreshRate)
-	done := make(chan bool)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-done:
+		case <-a.chStop:
 			return
 		case <-ticker.C:
 			a.RefreshUpgrade()
@@ -422,11 +485,11 @@ func (a *App) GoRefreshBlockTime() {
 	a.RefreshBlockTime()
 
 	ticker := time.NewTicker(a.Config.BlockTimeRefreshRate)
-	done := make(chan bool)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-done:
+		case <-a.chStop:
 			return
 		case <-ticker.C:
 			a.RefreshBlockTime()
@@ -455,11 +518,11 @@ func (a *App) GoRefreshNetInfo() {
 	a.RefreshNetInfo()
 
 	ticker := time.NewTicker(a.Config.RefreshRate)
-	done := make(chan bool)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-done:
+		case <-a.chStop:
 			return
 		case <-ticker.C:
 			a.RefreshNetInfo()
@@ -493,6 +556,8 @@ func (a *App) SubscribeCometBFT() {
 
 	for {
 		select {
+		case <-a.chStop:
+			return
 		case <-mbEvents.Notify():
 			events := mbEvents.RetrieveAll()
 			a.State.AddCometBFTEvents(events)
@@ -510,9 +575,14 @@ func (a *App) SubscribeCometBFT() {
 }
 
 func (a *App) DisplayLogs() {
-	for range a.mbLogs.Notify() {
-		for _, line := range a.mbLogs.RetrieveAll() {
-			a.DisplayWrapper.DebugText(line)
+	for {
+		select {
+		case <-a.chStop:
+			return
+		case <-a.mbLogs.Notify():
+			for _, line := range a.mbLogs.RetrieveAll() {
+				a.DisplayWrapper.DebugText(line)
+			}
 		}
 	}
 }
@@ -525,13 +595,15 @@ func (a *App) HandlePanic() {
 	}
 }
 
-// shutdown performs graceful shutdown with terminal cleanup.
+// shutdown is called from HandlePanic. Best-effort cleanup before
+// the re-panic takes the process down.
 func (a *App) shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if a.DisplayWrapper != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
 		_ = a.DisplayWrapper.Stop(ctx)
 	}
+	_ = a.Stop(ctx)
 	a.restoreTerminal()
 }
 
@@ -578,11 +650,16 @@ func (a *App) databaseCleanupRoutine() {
 		a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
 	}
 
-	for range ticker.C {
-		if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
-			a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
-		} else {
-			a.Logger.Debug().Msg("Database cleanup completed successfully")
+	for {
+		select {
+		case <-a.chStop:
+			return
+		case <-ticker.C:
+			if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
+			} else {
+				a.Logger.Debug().Msg("Database cleanup completed successfully")
+			}
 		}
 	}
 }
