@@ -98,11 +98,15 @@ func (f *DataFetcher) GetValidators() ([]types.TMValidator, error) {
 	for i, cometVal := range cometVals {
 		// Find matching Cosmos validator by consensus address
 		cosmosVal := cosmValMap[cometVal.PubKey.Address().String()]
+		votingPowerPercent := big.NewFloat(0)
+		if totalVotingPower > 0 {
+			votingPowerPercent = big.NewFloat(float64(cometVal.VotingPower) / float64(totalVotingPower) * 100)
+		}
 		vals = append(vals, types.TMValidator{
 			CometValidator:     cometVal,
 			CosmosValidator:    &cosmosVal,
 			Index:              i,
-			VotingPowerPercent: big.NewFloat(float64(cometVal.VotingPower / totalVotingPower)),
+			VotingPowerPercent: votingPowerPercent,
 		})
 	}
 	return vals, nil
