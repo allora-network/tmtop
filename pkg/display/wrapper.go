@@ -288,16 +288,17 @@ func (w *Wrapper) SetState(state *types.State) {
 	w.App.QueueUpdateDraw(func() {
 		w.State = state
 
-		// Use TMValidators and RoundDataMap
-		w.LastRoundTableData.SetTMValidators(state.GetTMValidators(), state.ConsensusStateError)
+		validators := state.GetTMValidators()
+		consensusHeight, consensusRound, _, _ := state.GetConsensusHeight()
+		w.LastRoundTableData.SetTMValidators(validators, state.GetConsensusStateError())
 		w.LastRoundTableData.SetRoundData(state.VotesByRound)
-		w.LastRoundTableData.SetCurrentRound(state.Height, int32(state.Round))
+		w.LastRoundTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 		if w.AllRoundsTableData != nil {
-			w.AllRoundsTableData.SetTMValidators(state.GetTMValidators(), state.Height)
+			w.AllRoundsTableData.SetTMValidators(validators, consensusHeight)
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
 			w.AllRoundsTableData.Update()
 		}
-		w.NetInfoTableData.SetNetInfo(state.NetInfo)
+		w.NetInfoTableData.SetNetInfo(state.GetNetInfo())
 		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
 
 		w.ConsensusInfoTextView.Clear()

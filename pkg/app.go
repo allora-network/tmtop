@@ -278,7 +278,7 @@ func (a *App) fetchRPCInfo(rpcURL string) {
 	rpc.Moniker = status.NodeInfo.Moniker
 	rpc.ValidatorAddress = status.ValidatorInfo.Address.String()
 
-	for _, cv := range a.State.TMValidators {
+	for _, cv := range a.State.GetTMValidators() {
 		if strings.EqualFold(cv.CosmosValidator.ConsensusPubkey.Address().String(), rpc.ValidatorAddress) {
 			rpc.ValidatorMoniker = cv.CosmosValidator.Moniker
 			break

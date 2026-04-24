@@ -11,21 +11,24 @@ import (
 
 // SerializeConsensus renders the top-left consensus summary block.
 func SerializeConsensus(s *types.State, timezone *time.Location) string {
-	if s.ConsensusStateError != nil {
-		return fmt.Sprintf(" consensus state error: %s", s.ConsensusStateError)
+	if err := s.GetConsensusStateError(); err != nil {
+		return fmt.Sprintf(" consensus state error: %s", err)
 	}
 
-	if len(s.TMValidators) == 0 {
+	validators := s.GetTMValidators()
+	if len(validators) == 0 {
 		return ""
 	}
 
+	height, round, step, startTime := s.GetConsensusHeight()
+
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, " height=%d round=%d step=%d\n", s.Height, s.Round, s.Step)
+	fmt.Fprintf(&sb, " height=%d round=%d step=%d\n", height, round, step)
 	fmt.Fprintf(&sb,
 		" block time: %s (%s)\n",
-		utils.ZeroOrPositiveDuration(utils.SerializeDuration(time.Since(s.StartTime))),
-		utils.SerializeTime(s.StartTime.In(timezone)),
+		utils.ZeroOrPositiveDuration(utils.SerializeDuration(time.Since(startTime))),
+		utils.SerializeTime(startTime.In(timezone)),
 	)
 	fmt.Fprintf(&sb,
 		" prevote consensus (total/agreeing): %.2f / %.2f\n",
@@ -47,55 +50,60 @@ func SerializeConsensus(s *types.State, timezone *time.Location) string {
 func SerializeChainInfo(s *types.State, timezone *time.Location) string {
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, " rpc: %v\n", s.CurrentRPC().URL)
-	fmt.Fprintf(&sb, " (%v)\n\n", s.CurrentRPC().Moniker)
+	rpc := s.CurrentRPC()
+	fmt.Fprintf(&sb, " rpc: %v\n", rpc.URL)
+	fmt.Fprintf(&sb, " (%v)\n\n", rpc.Moniker)
 
-	if s.ChainInfoError != nil {
-		fmt.Fprintf(&sb, " chain info fetch error: %s\n", s.ChainInfoError.Error())
-	} else if s.ChainInfo != nil {
-		fmt.Fprintf(&sb, " chain name: %s\n", s.ChainInfo.NodeInfo.Network)
-		fmt.Fprintf(&sb, " tendermint version: v%s\n", s.ChainInfo.NodeInfo.Version)
+	chainInfo := s.GetChainInfo()
+	blockTime := s.GetBlockTime()
+	if chainInfoErr := s.GetChainInfoError(); chainInfoErr != nil {
+		fmt.Fprintf(&sb, " chain info fetch error: %s\n", chainInfoErr.Error())
+	} else if chainInfo != nil {
+		fmt.Fprintf(&sb, " chain name: %s\n", chainInfo.NodeInfo.Network)
+		fmt.Fprintf(&sb, " tendermint version: v%s\n", chainInfo.NodeInfo.Version)
 
-		if s.BlockTime != 0 {
-			fmt.Fprintf(&sb, " avg block time: %s\n", utils.SerializeDuration(s.BlockTime))
+		if blockTime != 0 {
+			fmt.Fprintf(&sb, " avg block time: %s\n", utils.SerializeDuration(blockTime))
 		}
 	}
 
-	if s.UpgradePlanError != nil {
-		fmt.Fprintf(&sb, " upgrade plan fetch error: %s\n", s.UpgradePlanError)
-	} else if s.Upgrade == nil {
+	upgrade := s.GetUpgrade()
+	if upgradePlanErr := s.GetUpgradePlanError(); upgradePlanErr != nil {
+		fmt.Fprintf(&sb, " upgrade plan fetch error: %s\n", upgradePlanErr)
+	} else if upgrade == nil {
 		sb.WriteString(" no chain upgrade scheduled\n")
 	} else {
-		sb.WriteString(serializeUpgradeInfo(s, timezone))
+		height, _, _, _ := s.GetConsensusHeight()
+		sb.WriteString(serializeUpgradeInfo(upgrade, height, blockTime, timezone))
 	}
 
 	return sb.String()
 }
 
-func serializeUpgradeInfo(s *types.State, timezone *time.Location) string {
+func serializeUpgradeInfo(upgrade *types.Upgrade, height int64, blockTime time.Duration, timezone *time.Location) string {
 	var sb strings.Builder
 
-	if s.Upgrade.Height+1 == s.Height {
+	if upgrade.Height+1 == height {
 		sb.WriteString(" upgrade in progress...\n")
 		return sb.String()
 	}
 
-	if s.Upgrade.Height+1 < s.Height {
+	if upgrade.Height+1 < height {
 		fmt.Fprintf(&sb,
 			" chain upgrade %s applied at block %d\n",
-			s.Upgrade.Name,
-			s.Upgrade.Height,
+			upgrade.Name,
+			upgrade.Height,
 		)
 		fmt.Fprintf(&sb,
 			" blocks since upgrade: %d\n",
-			s.Height-s.Upgrade.Height,
+			height-upgrade.Height,
 		)
 
-		if s.BlockTime == 0 {
+		if blockTime == 0 {
 			return sb.String()
 		}
 
-		upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
+		upgradeTime := utils.CalculateTimeTillBlock(height, upgrade.Height, blockTime)
 		fmt.Fprintf(&sb,
 			" time since upgrade: %s\n",
 			utils.SerializeDuration(time.Since(upgradeTime)),
@@ -106,19 +114,19 @@ func serializeUpgradeInfo(s *types.State, timezone *time.Location) string {
 
 	fmt.Fprintf(&sb,
 		" chain upgrade %s scheduled at block %d\n",
-		s.Upgrade.Name,
-		s.Upgrade.Height,
+		upgrade.Name,
+		upgrade.Height,
 	)
 	fmt.Fprintf(&sb,
 		" blocks till upgrade: %d\n",
-		s.Upgrade.Height-s.Height,
+		upgrade.Height-height,
 	)
 
-	if s.BlockTime == 0 {
+	if blockTime == 0 {
 		return sb.String()
 	}
 
-	upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
+	upgradeTime := utils.CalculateTimeTillBlock(height, upgrade.Height, blockTime)
 
 	fmt.Fprintf(&sb,
 		" time till upgrade: %s\n",
@@ -132,7 +140,7 @@ func serializeUpgradeInfo(s *types.State, timezone *time.Location) string {
 // SerializePrevotesProgressbar renders the prevote progress bar for the
 // current height/round.
 func SerializePrevotesProgressbar(s *types.State, width int, height int) string {
-	if len(s.TMValidators) == 0 {
+	if len(s.GetTMValidators()) == 0 {
 		return ""
 	}
 
@@ -143,7 +151,7 @@ func SerializePrevotesProgressbar(s *types.State, width int, height int) string 
 
 // SerializePrecommitsProgressbar renders the precommit progress bar.
 func SerializePrecommitsProgressbar(s *types.State, width int, height int) string {
-	if len(s.TMValidators) == 0 {
+	if len(s.GetTMValidators()) == 0 {
 		return ""
 	}
 
