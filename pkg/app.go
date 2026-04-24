@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,7 +24,6 @@ import (
 	butils "github.com/brynbellomy/go-utils"
 	cnstypes "github.com/cometbft/cometbft/consensus/types"
 	ctypes "github.com/cometbft/cometbft/types"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog"
 )
 
@@ -49,8 +47,6 @@ type App struct {
 	chStop    chan struct{}
 	closeOnce sync.Once
 	wgDone    *sync.WaitGroup
-
-	cleanupFuncs []func()
 }
 
 func NewApp(config *configPkg.Config, version string) *App {
@@ -108,7 +104,6 @@ func NewApp(config *configPkg.Config, version string) *App {
 		DataFetcher:    fetcher.NewDataFetcher(config, state, logger),
 		chStop:         make(chan struct{}),
 		wgDone:         &sync.WaitGroup{},
-		cleanupFuncs:   make([]func(), 0),
 	}
 	// Display needs a pointer to the pause flag so its input handler
 	// can toggle it in-place.
@@ -122,9 +117,6 @@ func (a *App) Start() {
 		analytics.Run(a.Config, a.DB, a.Logger)
 		return
 	}
-
-	// Set up terminal cleanup on exit
-	defer a.restoreTerminal()
 
 	if a.Config.WithTopologyAPI {
 		a.spawn(a.ServeTopology)
@@ -416,7 +408,9 @@ func (a *App) HandlePanic() {
 }
 
 // shutdown is called from HandlePanic. Best-effort cleanup before
-// the re-panic takes the process down.
+// the re-panic takes the process down. Display.Stop already restores
+// the terminal; we just add a last-resort second call in case Stop
+// fails.
 func (a *App) shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -424,40 +418,6 @@ func (a *App) shutdown() {
 		_ = a.DisplayWrapper.Stop(ctx)
 	}
 	_ = a.Stop(ctx)
-	a.restoreTerminal()
-}
-
-// restoreTerminal restores terminal state and cleans up.
-func (a *App) restoreTerminal() {
-	// Get the default screen to ensure proper cleanup
-	screen, err := tcell.NewScreen()
-	if err == nil && screen != nil {
-		// Initialize screen briefly to ensure proper state
-		if err := screen.Init(); err == nil {
-			// Clear the screen and restore cursor
-			screen.Clear()
-			screen.ShowCursor(0, 0)
-			screen.Sync()
-			screen.Fini()
-		}
-	}
-
-	// Send additional terminal reset sequences
-	fmt.Print("\033[?25h")   // Show cursor
-	fmt.Print("\033[0m")     // Reset colors
-	fmt.Print("\033[2J")     // Clear screen
-	fmt.Print("\033[H")      // Move cursor to top-left
-	fmt.Print("\033[?1049l") // Exit alternate screen buffer
-
-	// Run any additional cleanup functions
-	for _, cleanup := range a.cleanupFuncs {
-		cleanup()
-	}
-}
-
-// addCleanupFunc registers a function to be called during shutdown.
-func (a *App) addCleanupFunc(fn func()) {
-	a.cleanupFuncs = append(a.cleanupFuncs, fn)
 }
 
 // databaseCleanupRoutine runs periodic retention cleanup.

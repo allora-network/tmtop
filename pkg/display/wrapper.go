@@ -445,9 +445,22 @@ func (w *Wrapper) cleanup() {
 	w.restoreTerminal()
 }
 
-// restoreTerminal restores terminal state.
+// restoreTerminal restores terminal state. Called after tview has
+// exited, on both happy-path shutdown and panic recovery.
 func (w *Wrapper) restoreTerminal() {
-	// Send terminal reset sequences to restore state
+	// Briefly re-init a tcell screen and tear it down cleanly. This
+	// undoes any leftover alternate-screen / cursor state from tview.
+	if screen, err := tcell.NewScreen(); err == nil && screen != nil {
+		if err := screen.Init(); err == nil {
+			screen.Clear()
+			screen.ShowCursor(0, 0)
+			screen.Sync()
+			screen.Fini()
+		}
+	}
+
+	// Belt and suspenders: raw escape sequences in case tcell couldn't
+	// re-init (e.g. stdin already closed).
 	fmt.Print("\033[?25h")   // Show cursor
 	fmt.Print("\033[0m")     // Reset colors
 	fmt.Print("\033[2J")     // Clear screen
