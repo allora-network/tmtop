@@ -13,8 +13,6 @@ import (
 	"main/pkg/types"
 )
 
-var LogChannel chan string
-
 type ComputeTopologyRequest struct {
 	CurrentHomeNode string   `query:"currentHomeNode"`
 	IncludeNodes    []string `query:"includeNodes"`

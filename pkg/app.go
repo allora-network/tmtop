@@ -33,7 +33,7 @@ type App struct {
 	Config         *configPkg.Config
 	DisplayWrapper display.Display
 	State          *types.State
-	LogChannel     chan string
+	mbLogs         *butils.Mailbox[string]
 
 	DB             *db.DB
 	ConsensusStore db.ConsensusStorer
@@ -50,10 +50,10 @@ type App struct {
 }
 
 func NewApp(config *configPkg.Config, version string) *App {
-	logChannel := make(chan string, 1000)
+	mbLogs := butils.NewMailbox[string](1000)
 	pauseChannel := make(chan bool)
 
-	logger := loggerPkg.GetLogger(logChannel, config).
+	logger := loggerPkg.GetLogger(mbLogs, config).
 		With().
 		Str("component", "app_manager").
 		Logger()
@@ -100,7 +100,7 @@ func NewApp(config *configPkg.Config, version string) *App {
 		Config:           config,
 		DisplayWrapper:   display.NewWrapper(config, state, logger, pauseChannel, version),
 		State:            state,
-		LogChannel:       logChannel,
+		mbLogs:           mbLogs,
 		DB:               database,
 		ConsensusStore:   consensusStore,
 		DataFetcher:      fetcher.NewDataFetcher(config, state, logger),
@@ -130,7 +130,6 @@ func (a *App) Start() {
 
 	if a.Config.WithTopologyAPI {
 		go a.ServeTopology()
-		topology.LogChannel = a.LogChannel
 	}
 
 	go a.CrawlRPCURLs()
@@ -512,9 +511,10 @@ func (a *App) SubscribeCometBFT() {
 }
 
 func (a *App) DisplayLogs() {
-	for {
-		logString := <-a.LogChannel
-		a.DisplayWrapper.DebugText(logString)
+	for range a.mbLogs.Notify() {
+		for _, line := range a.mbLogs.RetrieveAll() {
+			a.DisplayWrapper.DebugText(line)
+		}
 	}
 }
 
