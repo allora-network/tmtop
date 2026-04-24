@@ -1,6 +1,8 @@
 package fetcher
 
 import (
+	"fmt"
+
 	"main/pkg/config"
 	"main/pkg/http"
 	"main/pkg/types"
@@ -56,7 +58,14 @@ func (f *CosmosLCDDataFetcher) GetValidators() (types.CosmosValidators, error) {
 		}
 
 		consPubKey, err := validator.ConsPubKey()
+		if err != nil {
+			return nil, fmt.Errorf("getting consensus pubkey: %w", err)
+		}
+
 		cometConsPubKey, err := validator.CmtConsPublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("getting comet consensus pubkey: %w", err)
+		}
 
 		validators[i] = types.CosmosValidator{
 			Moniker:              validator.GetMoniker(),

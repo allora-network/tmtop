@@ -152,12 +152,12 @@ func (f *CosmosRPCDataFetcher) GetValidators() (types.CosmosValidators, error) {
 		assignedConsensusAddr, found := utils.Find(
 			assignedKeysResponse.PairValConAddr,
 			func(i *providerTypes.PairValConAddrProviderAndConsumer) bool {
-				equal, compareErr := utils.CompareTwoBech32(i.ProviderAddress, validator.RawAddress)
+				equal, compareErr := utils.CompareTwoBech32(i.ProviderAddress, validator.ConsensusAddress)
 				if compareErr != nil {
 					f.Logger.Error().
-						Str("operator_address", validator.Address).
+						Str("operator_address", validator.OperatorAddress).
 						Str("first", i.ProviderAddress).
-						Str("second", validator.RawAddress).
+						Str("second", validator.ConsensusAddress).
 						Msg("Error converting bech32 address")
 					return false
 				}
@@ -273,9 +273,9 @@ func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, e
 		addr := sdkTypes.ConsAddress(pubkey.Address())
 
 		validators[index] = types.CosmosValidator{
-			Moniker:    msgCreateValidator.Description.Moniker,
-			Address:    msgCreateValidator.ValidatorAddress, // Bech32 operator address
-			RawAddress: addr.String(),
+			Moniker:          msgCreateValidator.Description.Moniker,
+			OperatorAddress:  msgCreateValidator.ValidatorAddress, // Bech32 operator address
+			ConsensusAddress: addr.String(),
 		}
 	}
 
@@ -312,7 +312,14 @@ func (f *CosmosRPCDataFetcher) parseValidator(validator stakingTypes.Validator) 
 	}
 
 	consPubKey, err := validator.ConsPubKey()
+	if err != nil {
+		return types.CosmosValidator{}, fmt.Errorf("getting consensus pubkey: %w", err)
+	}
+
 	cometConsPubKey, err := validator.CmtConsPublicKey()
+	if err != nil {
+		return types.CosmosValidator{}, fmt.Errorf("getting comet consensus pubkey: %w", err)
+	}
 
 	return types.CosmosValidator{
 		Moniker:              validator.GetMoniker(),
