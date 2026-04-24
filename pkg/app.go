@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"main/pkg/analytics"
 	configPkg "main/pkg/config"
+	"main/pkg/crawler"
 	"main/pkg/db"
 	"main/pkg/display"
 	"main/pkg/fetcher"
@@ -43,9 +43,6 @@ type App struct {
 	DataFetcher fetcher.Fetcher
 
 	topologyServer *tmhttp.Server
-
-	mbRPCURLs        *butils.Mailbox[string]
-	rpcURLsLastFetch map[string]time.Time
 
 	IsPaused atomic.Bool
 
@@ -101,19 +98,17 @@ func NewApp(config *configPkg.Config, version string) *App {
 	}
 
 	app := &App{
-		Logger:           logger,
-		Version:          version,
-		Config:           config,
-		State:            state,
-		mbLogs:           mbLogs,
-		DB:               database,
-		ConsensusStore:   consensusStore,
-		DataFetcher:      fetcher.NewDataFetcher(config, state, logger),
-		mbRPCURLs:        butils.NewMailbox[string](1000),
-		rpcURLsLastFetch: make(map[string]time.Time),
-		chStop:           make(chan struct{}),
-		wgDone:           &sync.WaitGroup{},
-		cleanupFuncs:     make([]func(), 0),
+		Logger:         logger,
+		Version:        version,
+		Config:         config,
+		State:          state,
+		mbLogs:         mbLogs,
+		DB:             database,
+		ConsensusStore: consensusStore,
+		DataFetcher:    fetcher.NewDataFetcher(config, state, logger),
+		chStop:         make(chan struct{}),
+		wgDone:         &sync.WaitGroup{},
+		cleanupFuncs:   make([]func(), 0),
 	}
 	// Display needs a pointer to the pause flag so its input handler
 	// can toggle it in-place.
@@ -135,7 +130,8 @@ func (a *App) Start() {
 		a.spawn(a.ServeTopology)
 	}
 
-	a.spawn(a.CrawlRPCURLs)
+	c := crawler.New(a.Config.RPCHost, a.DataFetcher, a.State, a.Logger, a.chStop)
+	a.spawn(c.Run)
 
 	a.spawnRefresher("consensus", a.Config.RefreshRate, a.RefreshConsensus)
 	a.spawnRefresher("comet-node-info", a.Config.ChainInfoRefreshRate, a.RefreshCometNodeInfo)
@@ -230,88 +226,6 @@ func (a *App) ServeTopology() {
 	)
 	if err := a.topologyServer.Serve(); err != nil && err != http.ErrServerClosed {
 		a.Logger.Error().Err(err).Msg("topology server error")
-	}
-}
-
-func (a *App) CrawlRPCURLs() {
-	a.mbRPCURLs.Deliver(a.Config.RPCHost)
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.chStop:
-			return
-		case <-a.mbRPCURLs.Notify():
-			var wg sync.WaitGroup
-			for _, url := range a.mbRPCURLs.RetrieveAll() {
-				if lastFetch, ok := a.rpcURLsLastFetch[url]; ok && time.Since(lastFetch) < 15*time.Second {
-					continue
-				}
-				a.rpcURLsLastFetch[url] = time.Now()
-
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					a.fetchRPCInfo(url)
-				}()
-			}
-			wg.Wait()
-
-		case <-ticker.C:
-			for _, rpc := range a.State.KnownRPCs().Iter() {
-				if time.Since(a.rpcURLsLastFetch[rpc.URL]) >= 15*time.Second {
-					a.mbRPCURLs.Deliver(rpc.URL)
-				}
-			}
-		}
-	}
-}
-
-func (a *App) fetchRPCInfo(rpcURL string) {
-	netInfo, err := a.DataFetcher.GetNetInfo(rpcURL)
-	if err != nil {
-		a.Logger.Error().Err(err).Msg(fmt.Sprintf("error getting /net_info from %s", rpcURL))
-		return
-	}
-
-	status, err := a.DataFetcher.GetCometNodeStatus(rpcURL)
-	if err != nil {
-		a.Logger.Error().Err(err).Msg(fmt.Sprintf("error getting /status from %s", rpcURL))
-		return
-	}
-
-	var rpc types.RPC
-	if known, ok := a.State.KnownRPCByURL(rpcURL); ok {
-		rpc = known
-	}
-	rpc.ID = string(status.NodeInfo.ID())
-	rpc.URL = rpcURL
-	rpc.Moniker = status.NodeInfo.Moniker
-	rpc.ValidatorAddress = status.ValidatorInfo.Address.String()
-
-	for _, cv := range a.State.GetTMValidators() {
-		if strings.EqualFold(cv.CosmosValidator.ConsensusPubkey.Address().String(), rpc.ValidatorAddress) {
-			rpc.ValidatorMoniker = cv.CosmosValidator.Moniker
-			break
-		}
-	}
-
-	a.State.AddKnownRPC(rpc)
-	a.State.AddRPCPeers(rpcURL, netInfo.Peers)
-
-	for _, peer := range netInfo.Peers {
-		var peerRPC types.RPC
-		if known, ok := a.State.KnownRPCByURL(peer.URL()); ok {
-			peerRPC = known
-		}
-		peerRPC.ID = string(peer.NodeInfo.DefaultNodeID)
-		peerRPC.IP = peer.RemoteIP
-		peerRPC.URL = peer.URL()
-		peerRPC.Moniker = peer.NodeInfo.Moniker
-		a.State.AddKnownRPC(peerRPC)
-
-		a.mbRPCURLs.Deliver(peer.URL())
 	}
 }
 
