@@ -76,20 +76,23 @@ func (d *DB) DB() *sql.DB {
 	return d.db
 }
 
-// WithTx executes a function within a database transaction.
+// WithTx executes a function within a database transaction. The
+// transaction is rolled back if fn returns an error or the commit
+// fails. The deferred rollback after a successful commit is a no-op.
 func (d *DB) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("beginning tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
-	q := d.queries.WithTx(tx)
-	if err := fn(q); err != nil {
-		return err
+	if err := fn(d.queries.WithTx(tx)); err != nil {
+		return fmt.Errorf("running tx body: %w", err)
 	}
-
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
 }
 
 // migrate runs database migrations.

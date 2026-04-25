@@ -69,7 +69,7 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 		// Use default locations
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return err
+			return fmt.Errorf("locating user home directory: %w", err)
 		}
 
 		configDir := filepath.Join(homeDir, ".config", "tmtop")
@@ -110,7 +110,7 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	if err := v.ReadInConfig(); err != nil {
 		// Config file not found is acceptable - CLI flags/defaults will be used
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return err
+			return fmt.Errorf("reading config file %s: %w", v.ConfigFileUsed(), err)
 		}
 	}
 	fmt.Println("Loaded config file:", v.ConfigFileUsed())

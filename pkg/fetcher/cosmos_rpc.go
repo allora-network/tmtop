@@ -77,7 +77,7 @@ func (f *CosmosRPCDataFetcher) abciQuery(
 ) error {
 	dataBytes, err := message.Marshal()
 	if err != nil {
-		return err
+		return fmt.Errorf("marshalling abci query %s: %w", method, err)
 	}
 
 	methodName := fmt.Sprintf("\"%s\"", method)
@@ -89,18 +89,22 @@ func (f *CosmosRPCDataFetcher) abciQuery(
 
 	var response types.AbciQueryResponse
 	if err := client.Get(queryURL, &response); err != nil {
-		return err
+		return fmt.Errorf("abci query %s: %w", method, err)
 	}
 
 	if response.Result.Response.Code != 0 {
 		return fmt.Errorf(
-			"error in Tendermint response: expected code 0, but got %d, error: %s",
+			"abci query %s: code %d: %s",
+			method,
 			response.Result.Response.Code,
 			response.Result.Response.Log,
 		)
 	}
 
-	return output.Unmarshal(response.Result.Response.Value)
+	if err := output.Unmarshal(response.Result.Response.Value); err != nil {
+		return fmt.Errorf("unmarshalling abci response for %s: %w", method, err)
+	}
+	return nil
 }
 
 func (f *CosmosRPCDataFetcher) GetValidators() (types.CosmosValidators, error) {

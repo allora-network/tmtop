@@ -2,6 +2,7 @@ package topology
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	butils "github.com/brynbellomy/go-utils"
@@ -166,9 +167,11 @@ func ComputeTopologyDOT(topology Graph, req ComputeTopologyRequest) (graph.Graph
 func RenderTopologyDOT(topology graph.Graph, w io.Writer) error {
 	raw, err := dot.Marshal(topology, "topology", "", "")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshalling DOT graph: %w", err)
 	}
 
-	_, err = bytes.NewReader(raw).WriteTo(w)
-	return err
+	if _, err := bytes.NewReader(raw).WriteTo(w); err != nil {
+		return fmt.Errorf("writing DOT graph: %w", err)
+	}
+	return nil
 }
