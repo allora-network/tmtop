@@ -11,6 +11,16 @@ import (
 
 type Querier interface {
 	BatchCreateValidatorSnapshots(ctx context.Context, arg BatchCreateValidatorSnapshotsParams) error
+	CountConsensusEvents(ctx context.Context) (int64, error)
+	CountHeights(ctx context.Context) (int64, error)
+	CountHeightsInTimeWindow(ctx context.Context, arg CountHeightsInTimeWindowParams) (int64, error)
+	CountRounds(ctx context.Context) (int64, error)
+	CountValidatorSnapshots(ctx context.Context) (int64, error)
+	// COUNT helpers — one per table because sqlc can't parameterize
+	// table identifiers.
+	CountValidators(ctx context.Context) (int64, error)
+	CountVotes(ctx context.Context) (int64, error)
+	CountVotesForValidatorInTimeWindow(ctx context.Context, arg CountVotesForValidatorInTimeWindowParams) (int64, error)
 	CreateConsensusEvent(ctx context.Context, arg CreateConsensusEventParams) (ConsensusEvent, error)
 	CreateHeight(ctx context.Context, arg CreateHeightParams) (Height, error)
 	CreateRound(ctx context.Context, arg CreateRoundParams) (Round, error)
@@ -66,6 +76,12 @@ type Querier interface {
 	GetVotesForRound(ctx context.Context, arg GetVotesForRoundParams) ([]Vote, error)
 	GetVotesForValidator(ctx context.Context, arg GetVotesForValidatorParams) ([]Vote, error)
 	GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error)
+	ListAllValidators(ctx context.Context) ([]ListAllValidatorsRow, error)
+	SampleHeights(ctx context.Context) ([]SampleHeightsRow, error)
+	SampleValidators(ctx context.Context) ([]SampleValidatorsRow, error)
+	SampleVotes(ctx context.Context) ([]SampleVotesRow, error)
+	SampleVotesForValidator(ctx context.Context, arg SampleVotesForValidatorParams) ([]SampleVotesForValidatorRow, error)
+	SearchValidatorsByOperatorOrMoniker(ctx context.Context, arg SearchValidatorsByOperatorOrMonikerParams) ([]SearchValidatorsByOperatorOrMonikerRow, error)
 	UpdateRoundStep(ctx context.Context, arg UpdateRoundStepParams) (Round, error)
 	UpdateValidator(ctx context.Context, arg UpdateValidatorParams) (Validator, error)
 	UpsertHeight(ctx context.Context, arg UpsertHeightParams) (Height, error)
@@ -73,6 +89,7 @@ type Querier interface {
 	UpsertValidator(ctx context.Context, arg UpsertValidatorParams) (Validator, error)
 	UpsertValidatorSnapshot(ctx context.Context, arg UpsertValidatorSnapshotParams) (ValidatorSnapshot, error)
 	UpsertVote(ctx context.Context, arg UpsertVoteParams) (Vote, error)
+	ValidatorExistsByOperator(ctx context.Context, operatorAddress string) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

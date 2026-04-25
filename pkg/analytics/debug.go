@@ -6,20 +6,22 @@ import (
 	"fmt"
 
 	"main/pkg/db"
+	"main/pkg/db/sqlc"
 
 	"github.com/rs/zerolog"
 )
 
 // DatabaseDebugger provides debugging capabilities for the analytics database.
+// All queries go through sqlc — no raw SQL.
 type DatabaseDebugger struct {
-	db     *db.DB
+	q      *sqlc.Queries
 	logger zerolog.Logger
 }
 
 // NewDatabaseDebugger creates a new database debugger.
 func NewDatabaseDebugger(database *db.DB, logger zerolog.Logger) *DatabaseDebugger {
 	return &DatabaseDebugger{
-		db:     database,
+		q:      database.Queries(),
 		logger: logger.With().Str("component", "db_debugger").Logger(),
 	}
 }
@@ -28,32 +30,36 @@ func NewDatabaseDebugger(database *db.DB, logger zerolog.Logger) *DatabaseDebugg
 func (d *DatabaseDebugger) PrintDatabaseSummary(ctx context.Context) error {
 	fmt.Printf("\n=== Database Summary ===\n")
 
-	// Check each table
-	tables := []string{"validators", "heights", "rounds", "votes", "consensus_events", "validator_snapshots"}
-
-	for _, table := range tables {
-		count, err := d.getTableCount(ctx, table)
-		if err != nil {
-			fmt.Printf("❌ %s: ERROR - %v\n", table, err)
-			continue
-		}
-		fmt.Printf("📊 %s: %d records\n", table, count)
+	type counter struct {
+		name string
+		fn   func(context.Context) (int64, error)
+	}
+	counters := []counter{
+		{"validators", d.q.CountValidators},
+		{"heights", d.q.CountHeights},
+		{"rounds", d.q.CountRounds},
+		{"votes", d.q.CountVotes},
+		{"consensus_events", d.q.CountConsensusEvents},
+		{"validator_snapshots", d.q.CountValidatorSnapshots},
 	}
 
-	// Get sample data from key tables
+	for _, c := range counters {
+		count, err := c.fn(ctx)
+		if err != nil {
+			fmt.Printf("❌ %s: ERROR - %v\n", c.name, err)
+			continue
+		}
+		fmt.Printf("📊 %s: %d records\n", c.name, count)
+	}
+
 	fmt.Printf("\n=== Sample Data ===\n")
 
-	// Sample validators
 	if err := d.printSampleValidators(ctx); err != nil {
 		fmt.Printf("❌ Error getting validators: %v\n", err)
 	}
-
-	// Sample heights
 	if err := d.printSampleHeights(ctx); err != nil {
 		fmt.Printf("❌ Error getting heights: %v\n", err)
 	}
-
-	// Sample votes
 	if err := d.printSampleVotes(ctx); err != nil {
 		fmt.Printf("❌ Error getting votes: %v\n", err)
 	}
@@ -61,20 +67,19 @@ func (d *DatabaseDebugger) PrintDatabaseSummary(ctx context.Context) error {
 	return nil
 }
 
-// DiagnoseValidatorData checks if a specific validator has data.
+// DiagnoseValidatorData checks if a specific validator (by operator
+// address) has data in the requested time window.
 func (d *DatabaseDebugger) DiagnoseValidatorData(ctx context.Context, validatorAddr string, timeWindow TimeWindow) error {
 	fmt.Printf("\n=== Validator Diagnosis ===\n")
 	fmt.Printf("Validator: %s\n", validatorAddr)
 	fmt.Printf("Time Window: %s to %s\n", timeWindow.Start.Format("2006-01-02 15:04:05"), timeWindow.End.Format("2006-01-02 15:04:05"))
 	fmt.Printf("==========================\n\n")
 
-	// Check if validator exists in validators table
-	validatorExists, err := d.checkValidatorExists(ctx, validatorAddr)
+	count, err := d.q.ValidatorExistsByOperator(ctx, validatorAddr)
 	if err != nil {
-		return fmt.Errorf("error checking validator existence: %w", err)
+		return fmt.Errorf("checking validator existence: %w", err)
 	}
-
-	if validatorExists {
+	if count > 0 {
 		fmt.Printf("✅ Validator found in validators table\n")
 	} else {
 		fmt.Printf("❌ Validator NOT found in validators table\n")
@@ -84,21 +89,25 @@ func (d *DatabaseDebugger) DiagnoseValidatorData(ctx context.Context, validatorA
 		}
 	}
 
-	// Check heights in time window
-	heightCount, err := d.getHeightsInWindow(ctx, timeWindow)
+	heightCount, err := d.q.CountHeightsInTimeWindow(ctx, sqlc.CountHeightsInTimeWindowParams{
+		BlockTime:   sql.NullTime{Time: timeWindow.Start, Valid: true},
+		BlockTime_2: sql.NullTime{Time: timeWindow.End, Valid: true},
+	})
 	if err != nil {
-		return fmt.Errorf("error checking heights: %w", err)
+		return fmt.Errorf("counting heights in window: %w", err)
 	}
 	fmt.Printf("📊 Heights in time window: %d\n", heightCount)
 
-	// Check votes for this validator in time window
-	voteCount, err := d.getVotesForValidatorInWindow(ctx, validatorAddr, timeWindow)
+	voteCount, err := d.q.CountVotesForValidatorInTimeWindow(ctx, sqlc.CountVotesForValidatorInTimeWindowParams{
+		OperatorAddress: validatorAddr,
+		BlockTime:       sql.NullTime{Time: timeWindow.Start, Valid: true},
+		BlockTime_2:     sql.NullTime{Time: timeWindow.End, Valid: true},
+	})
 	if err != nil {
-		return fmt.Errorf("error checking votes: %w", err)
+		return fmt.Errorf("counting votes for validator in window: %w", err)
 	}
 	fmt.Printf("🗳️  Votes for validator in time window: %d\n", voteCount)
 
-	// Sample some votes for this validator
 	if err := d.printSampleValidatorVotes(ctx, validatorAddr, 5); err != nil {
 		fmt.Printf("❌ Error getting sample votes: %v\n", err)
 	}
@@ -106,258 +115,154 @@ func (d *DatabaseDebugger) DiagnoseValidatorData(ctx context.Context, validatorA
 	return nil
 }
 
-func (d *DatabaseDebugger) getTableCount(ctx context.Context, tableName string) (int, error) {
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
-	row := d.db.DB().QueryRowContext(ctx, query)
-
-	var count int
-	err := row.Scan(&count)
-	return count, err
-}
-
 func (d *DatabaseDebugger) printSampleValidators(ctx context.Context) error {
-	query := "SELECT address, moniker, voting_power FROM validators LIMIT 5"
-	rows, err := d.db.DB().QueryContext(ctx, query)
+	rows, err := d.q.SampleValidators(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("sampling validators: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Printf("👥 Sample Validators:\n")
-	for rows.Next() {
-		var address, moniker string
-		var votingPower int64
-		if err := rows.Scan(&address, &moniker, &votingPower); err != nil {
-			return err
+	for _, row := range rows {
+		moniker := ""
+		if row.Moniker.Valid {
+			moniker = row.Moniker.String
 		}
-		fmt.Printf("   %s (%s) - Power: %d\n", address, moniker, votingPower)
+		fmt.Printf("   %s (%s) - Power: %d\n", row.OperatorAddress, moniker, row.VotingPower)
 	}
-
-	return rows.Err()
+	return nil
 }
 
 func (d *DatabaseDebugger) printSampleHeights(ctx context.Context) error {
-	query := "SELECT height, block_time, proposer_address FROM heights ORDER BY height DESC LIMIT 5"
-	rows, err := d.db.DB().QueryContext(ctx, query)
+	rows, err := d.q.SampleHeights(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("sampling heights: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Printf("📏 Sample Heights (latest):\n")
-	for rows.Next() {
-		var height int64
-		var blockTime sql.NullTime
-		var proposer sql.NullString
-		if err := rows.Scan(&height, &blockTime, &proposer); err != nil {
-			return err
-		}
-
-		blockTimeStr := "NULL"
-		if blockTime.Valid {
-			blockTimeStr = blockTime.Time.Format("2006-01-02 15:04:05")
-		}
-
-		proposerStr := "NULL"
-		if proposer.Valid {
-			proposerStr = proposer.String
-		}
-
-		fmt.Printf("   Height: %d, Time: %s, Proposer: %s\n", height, blockTimeStr, proposerStr)
+	for _, row := range rows {
+		blockTimeStr := nullTimeStr(row.BlockTime, "2006-01-02 15:04:05")
+		proposerStr := nullStringStr(row.ProposerAddress)
+		fmt.Printf("   Height: %d, Time: %s, Proposer: %s\n", row.Height, blockTimeStr, proposerStr)
 	}
-
-	return rows.Err()
+	return nil
 }
 
 func (d *DatabaseDebugger) printSampleVotes(ctx context.Context) error {
-	query := "SELECT height, round_number, validator_address, vote_type, timestamp FROM votes LIMIT 5"
-	rows, err := d.db.DB().QueryContext(ctx, query)
+	rows, err := d.q.SampleVotes(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("sampling votes: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Printf("🗳️  Sample Votes:\n")
-	for rows.Next() {
-		var height, round, voteType int64
-		var validatorAddr string
-		var timestamp sql.NullTime
-		if err := rows.Scan(&height, &round, &validatorAddr, &voteType, &timestamp); err != nil {
-			return err
-		}
-
-		timestampStr := "NULL"
-		if timestamp.Valid {
-			timestampStr = timestamp.Time.Format("15:04:05")
-		}
-
-		fmt.Printf("   H:%d R:%d Validator:%s Type:%d Time:%s\n", height, round, validatorAddr, voteType, timestampStr)
+	for _, row := range rows {
+		timestampStr := nullTimeStr(row.Timestamp, "15:04:05")
+		fmt.Printf("   H:%d R:%d Validator:%s Type:%d Time:%s\n",
+			row.Height, row.RoundNumber, row.ValidatorHexAddress, row.VoteType, timestampStr)
 	}
-
-	return rows.Err()
-}
-
-func (d *DatabaseDebugger) checkValidatorExists(ctx context.Context, validatorAddr string) (bool, error) {
-	query := "SELECT COUNT(*) FROM validators WHERE address = ?"
-	row := d.db.DB().QueryRowContext(ctx, query, validatorAddr)
-
-	var count int
-	err := row.Scan(&count)
-	return count > 0, err
+	return nil
 }
 
 func (d *DatabaseDebugger) printAllValidators(ctx context.Context) error {
-	// First get the total count
-	countQuery := "SELECT COUNT(*) FROM validators"
-	row := d.db.DB().QueryRowContext(ctx, countQuery)
-	var totalCount int
-	if err := row.Scan(&totalCount); err != nil {
-		return err
+	totalCount, err := d.q.CountValidators(ctx)
+	if err != nil {
+		return fmt.Errorf("counting validators: %w", err)
 	}
-
 	fmt.Printf("   Total validators in database: %d\n", totalCount)
 
-	// Show all validators (no limit)
-	query := "SELECT address, moniker FROM validators ORDER BY address"
-	rows, err := d.db.DB().QueryContext(ctx, query)
+	rows, err := d.q.ListAllValidators(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("listing validators: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Printf("   All validators:\n")
-	count := 0
-	for rows.Next() {
-		var address, moniker string
-		if err := rows.Scan(&address, &moniker); err != nil {
-			return err
+	for i, row := range rows {
+		moniker := ""
+		if row.Moniker.Valid {
+			moniker = row.Moniker.String
 		}
-		count++
 		if moniker != "" {
-			fmt.Printf("   %d. %s (%s)\n", count, address, moniker)
+			fmt.Printf("   %d. %s (%s)\n", i+1, row.OperatorAddress, moniker)
 		} else {
-			fmt.Printf("   %d. %s\n", count, address)
+			fmt.Printf("   %d. %s\n", i+1, row.OperatorAddress)
 		}
 	}
-
-	return rows.Err()
-}
-
-func (d *DatabaseDebugger) getHeightsInWindow(ctx context.Context, window TimeWindow) (int, error) {
-	query := "SELECT COUNT(*) FROM heights WHERE block_time >= ? AND block_time <= ?"
-	row := d.db.DB().QueryRowContext(ctx, query, window.Start, window.End)
-
-	var count int
-	err := row.Scan(&count)
-	return count, err
-}
-
-func (d *DatabaseDebugger) getVotesForValidatorInWindow(ctx context.Context, validatorAddr string, window TimeWindow) (int, error) {
-	query := `
-		SELECT COUNT(*) 
-		FROM votes v 
-		JOIN heights h ON v.height = h.height 
-		WHERE v.validator_address = ? AND h.block_time >= ? AND h.block_time <= ?
-	`
-	row := d.db.DB().QueryRowContext(ctx, query, validatorAddr, window.Start, window.End)
-
-	var count int
-	err := row.Scan(&count)
-	return count, err
+	return nil
 }
 
 func (d *DatabaseDebugger) printSampleValidatorVotes(ctx context.Context, validatorAddr string, limit int) error {
-	query := `
-		SELECT v.height, v.round_number, v.vote_type, v.timestamp, h.block_time 
-		FROM votes v 
-		JOIN heights h ON v.height = h.height 
-		WHERE v.validator_address = ? 
-		ORDER BY v.height DESC 
-		LIMIT ?
-	`
-	rows, err := d.db.DB().QueryContext(ctx, query, validatorAddr, limit)
+	rows, err := d.q.SampleVotesForValidator(ctx, sqlc.SampleVotesForValidatorParams{
+		OperatorAddress: validatorAddr,
+		Limit:           int64(limit),
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("sampling votes for validator: %w", err)
 	}
-	defer rows.Close()
 
 	fmt.Printf("🔍 Sample votes for validator %s:\n", validatorAddr)
-	count := 0
-	for rows.Next() {
-		var height, round, voteType int64
-		var voteTime, blockTime sql.NullTime
-		if err := rows.Scan(&height, &round, &voteType, &voteTime, &blockTime); err != nil {
-			return err
-		}
-
-		voteTimeStr := "NULL"
-		if voteTime.Valid {
-			voteTimeStr = voteTime.Time.Format("15:04:05")
-		}
-
-		blockTimeStr := "NULL"
-		if blockTime.Valid {
-			blockTimeStr = blockTime.Time.Format("15:04:05")
-		}
-
+	for _, row := range rows {
+		voteTimeStr := nullTimeStr(row.Timestamp, "15:04:05")
+		blockTimeStr := nullTimeStr(row.BlockTime, "15:04:05")
 		fmt.Printf("   H:%d R:%d Type:%d VoteTime:%s BlockTime:%s\n",
-			height, round, voteType, voteTimeStr, blockTimeStr)
-		count++
+			row.Height, row.RoundNumber, row.VoteType, voteTimeStr, blockTimeStr)
 	}
-
-	if count == 0 {
+	if len(rows) == 0 {
 		fmt.Printf("   No votes found for this validator\n")
 	}
-
-	return rows.Err()
+	return nil
 }
 
-// SearchValidators searches for validators by partial address or moniker.
+// SearchValidators searches for validators by partial operator
+// address or moniker (case-insensitive).
 func (d *DatabaseDebugger) SearchValidators(ctx context.Context, searchTerm string) error {
 	fmt.Printf("\n=== Validator Search ===\n")
 	fmt.Printf("Search term: %s\n", searchTerm)
 	fmt.Printf("=======================\n\n")
 
-	// Search by address (partial match)
-	query := `
-		SELECT address, moniker, voting_power 
-		FROM validators 
-		WHERE address LIKE ? OR LOWER(moniker) LIKE LOWER(?) 
-		ORDER BY address
-	`
-
-	searchPattern := "%" + searchTerm + "%"
-	rows, err := d.db.DB().QueryContext(ctx, query, searchPattern, searchPattern)
+	pattern := "%" + searchTerm + "%"
+	rows, err := d.q.SearchValidatorsByOperatorOrMoniker(ctx, sqlc.SearchValidatorsByOperatorOrMonikerParams{
+		OperatorAddress: pattern,
+		LOWER:           pattern,
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("searching validators: %w", err)
 	}
-	defer rows.Close()
 
-	matches := 0
 	fmt.Printf("🔍 Matching validators:\n")
-	for rows.Next() {
-		var address, moniker string
-		var votingPower int64
-		if err := rows.Scan(&address, &moniker, &votingPower); err != nil {
-			return err
+	for i, row := range rows {
+		moniker := ""
+		if row.Moniker.Valid {
+			moniker = row.Moniker.String
 		}
-		matches++
 		if moniker != "" {
-			fmt.Printf("   %d. %s (%s) - Power: %d\n", matches, address, moniker, votingPower)
+			fmt.Printf("   %d. %s (%s) - Power: %d\n", i+1, row.OperatorAddress, moniker, row.VotingPower)
 		} else {
-			fmt.Printf("   %d. %s - Power: %d\n", matches, address, votingPower)
+			fmt.Printf("   %d. %s - Power: %d\n", i+1, row.OperatorAddress, row.VotingPower)
 		}
 	}
 
-	if matches == 0 {
+	if len(rows) == 0 {
 		fmt.Printf("   No validators found matching '%s'\n", searchTerm)
 		fmt.Printf("\n💡 Try:\n")
 		fmt.Printf("   - Use a shorter search term\n")
 		fmt.Printf("   - Check the exact validator address format\n")
 		fmt.Printf("   - Run the 'debug' command to see all available validators\n")
 	} else {
-		fmt.Printf("\nFound %d matching validator(s)\n", matches)
+		fmt.Printf("\nFound %d matching validator(s)\n", len(rows))
 	}
 
-	return rows.Err()
+	return nil
+}
+
+func nullTimeStr(t sql.NullTime, layout string) string {
+	if !t.Valid {
+		return "NULL"
+	}
+	return t.Time.Format(layout)
+}
+
+func nullStringStr(s sql.NullString) string {
+	if !s.Valid {
+		return "NULL"
+	}
+	return s.String
 }

@@ -27,6 +27,30 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.batchCreateValidatorSnapshotsStmt, err = db.PrepareContext(ctx, batchCreateValidatorSnapshots); err != nil {
 		return nil, fmt.Errorf("error preparing query BatchCreateValidatorSnapshots: %w", err)
 	}
+	if q.countConsensusEventsStmt, err = db.PrepareContext(ctx, countConsensusEvents); err != nil {
+		return nil, fmt.Errorf("error preparing query CountConsensusEvents: %w", err)
+	}
+	if q.countHeightsStmt, err = db.PrepareContext(ctx, countHeights); err != nil {
+		return nil, fmt.Errorf("error preparing query CountHeights: %w", err)
+	}
+	if q.countHeightsInTimeWindowStmt, err = db.PrepareContext(ctx, countHeightsInTimeWindow); err != nil {
+		return nil, fmt.Errorf("error preparing query CountHeightsInTimeWindow: %w", err)
+	}
+	if q.countRoundsStmt, err = db.PrepareContext(ctx, countRounds); err != nil {
+		return nil, fmt.Errorf("error preparing query CountRounds: %w", err)
+	}
+	if q.countValidatorSnapshotsStmt, err = db.PrepareContext(ctx, countValidatorSnapshots); err != nil {
+		return nil, fmt.Errorf("error preparing query CountValidatorSnapshots: %w", err)
+	}
+	if q.countValidatorsStmt, err = db.PrepareContext(ctx, countValidators); err != nil {
+		return nil, fmt.Errorf("error preparing query CountValidators: %w", err)
+	}
+	if q.countVotesStmt, err = db.PrepareContext(ctx, countVotes); err != nil {
+		return nil, fmt.Errorf("error preparing query CountVotes: %w", err)
+	}
+	if q.countVotesForValidatorInTimeWindowStmt, err = db.PrepareContext(ctx, countVotesForValidatorInTimeWindow); err != nil {
+		return nil, fmt.Errorf("error preparing query CountVotesForValidatorInTimeWindow: %w", err)
+	}
 	if q.createConsensusEventStmt, err = db.PrepareContext(ctx, createConsensusEvent); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateConsensusEvent: %w", err)
 	}
@@ -162,6 +186,24 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getVotingPowerForRoundStmt, err = db.PrepareContext(ctx, getVotingPowerForRound); err != nil {
 		return nil, fmt.Errorf("error preparing query GetVotingPowerForRound: %w", err)
 	}
+	if q.listAllValidatorsStmt, err = db.PrepareContext(ctx, listAllValidators); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllValidators: %w", err)
+	}
+	if q.sampleHeightsStmt, err = db.PrepareContext(ctx, sampleHeights); err != nil {
+		return nil, fmt.Errorf("error preparing query SampleHeights: %w", err)
+	}
+	if q.sampleValidatorsStmt, err = db.PrepareContext(ctx, sampleValidators); err != nil {
+		return nil, fmt.Errorf("error preparing query SampleValidators: %w", err)
+	}
+	if q.sampleVotesStmt, err = db.PrepareContext(ctx, sampleVotes); err != nil {
+		return nil, fmt.Errorf("error preparing query SampleVotes: %w", err)
+	}
+	if q.sampleVotesForValidatorStmt, err = db.PrepareContext(ctx, sampleVotesForValidator); err != nil {
+		return nil, fmt.Errorf("error preparing query SampleVotesForValidator: %w", err)
+	}
+	if q.searchValidatorsByOperatorOrMonikerStmt, err = db.PrepareContext(ctx, searchValidatorsByOperatorOrMoniker); err != nil {
+		return nil, fmt.Errorf("error preparing query SearchValidatorsByOperatorOrMoniker: %w", err)
+	}
 	if q.updateRoundStepStmt, err = db.PrepareContext(ctx, updateRoundStep); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateRoundStep: %w", err)
 	}
@@ -183,6 +225,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.upsertVoteStmt, err = db.PrepareContext(ctx, upsertVote); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertVote: %w", err)
 	}
+	if q.validatorExistsByOperatorStmt, err = db.PrepareContext(ctx, validatorExistsByOperator); err != nil {
+		return nil, fmt.Errorf("error preparing query ValidatorExistsByOperator: %w", err)
+	}
 	return &q, nil
 }
 
@@ -191,6 +236,46 @@ func (q *Queries) Close() error {
 	if q.batchCreateValidatorSnapshotsStmt != nil {
 		if cerr := q.batchCreateValidatorSnapshotsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing batchCreateValidatorSnapshotsStmt: %w", cerr)
+		}
+	}
+	if q.countConsensusEventsStmt != nil {
+		if cerr := q.countConsensusEventsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countConsensusEventsStmt: %w", cerr)
+		}
+	}
+	if q.countHeightsStmt != nil {
+		if cerr := q.countHeightsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countHeightsStmt: %w", cerr)
+		}
+	}
+	if q.countHeightsInTimeWindowStmt != nil {
+		if cerr := q.countHeightsInTimeWindowStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countHeightsInTimeWindowStmt: %w", cerr)
+		}
+	}
+	if q.countRoundsStmt != nil {
+		if cerr := q.countRoundsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countRoundsStmt: %w", cerr)
+		}
+	}
+	if q.countValidatorSnapshotsStmt != nil {
+		if cerr := q.countValidatorSnapshotsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countValidatorSnapshotsStmt: %w", cerr)
+		}
+	}
+	if q.countValidatorsStmt != nil {
+		if cerr := q.countValidatorsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countValidatorsStmt: %w", cerr)
+		}
+	}
+	if q.countVotesStmt != nil {
+		if cerr := q.countVotesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countVotesStmt: %w", cerr)
+		}
+	}
+	if q.countVotesForValidatorInTimeWindowStmt != nil {
+		if cerr := q.countVotesForValidatorInTimeWindowStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countVotesForValidatorInTimeWindowStmt: %w", cerr)
 		}
 	}
 	if q.createConsensusEventStmt != nil {
@@ -418,6 +503,36 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getVotingPowerForRoundStmt: %w", cerr)
 		}
 	}
+	if q.listAllValidatorsStmt != nil {
+		if cerr := q.listAllValidatorsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllValidatorsStmt: %w", cerr)
+		}
+	}
+	if q.sampleHeightsStmt != nil {
+		if cerr := q.sampleHeightsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing sampleHeightsStmt: %w", cerr)
+		}
+	}
+	if q.sampleValidatorsStmt != nil {
+		if cerr := q.sampleValidatorsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing sampleValidatorsStmt: %w", cerr)
+		}
+	}
+	if q.sampleVotesStmt != nil {
+		if cerr := q.sampleVotesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing sampleVotesStmt: %w", cerr)
+		}
+	}
+	if q.sampleVotesForValidatorStmt != nil {
+		if cerr := q.sampleVotesForValidatorStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing sampleVotesForValidatorStmt: %w", cerr)
+		}
+	}
+	if q.searchValidatorsByOperatorOrMonikerStmt != nil {
+		if cerr := q.searchValidatorsByOperatorOrMonikerStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing searchValidatorsByOperatorOrMonikerStmt: %w", cerr)
+		}
+	}
 	if q.updateRoundStepStmt != nil {
 		if cerr := q.updateRoundStepStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateRoundStepStmt: %w", cerr)
@@ -451,6 +566,11 @@ func (q *Queries) Close() error {
 	if q.upsertVoteStmt != nil {
 		if cerr := q.upsertVoteStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertVoteStmt: %w", cerr)
+		}
+	}
+	if q.validatorExistsByOperatorStmt != nil {
+		if cerr := q.validatorExistsByOperatorStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing validatorExistsByOperatorStmt: %w", cerr)
 		}
 	}
 	return err
@@ -490,119 +610,149 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                                     DBTX
-	tx                                     *sql.Tx
-	batchCreateValidatorSnapshotsStmt      *sql.Stmt
-	createConsensusEventStmt               *sql.Stmt
-	createHeightStmt                       *sql.Stmt
-	createRoundStmt                        *sql.Stmt
-	createValidatorStmt                    *sql.Stmt
-	createValidatorSnapshotStmt            *sql.Stmt
-	createVoteStmt                         *sql.Stmt
-	deleteConsensusEventsOlderThanStmt     *sql.Stmt
-	deleteHeightsOlderThanStmt             *sql.Stmt
-	deleteRoundsOlderThanStmt              *sql.Stmt
-	deleteValidatorStmt                    *sql.Stmt
-	deleteValidatorSnapshotsOlderThanStmt  *sql.Stmt
-	deleteVotesOlderThanStmt               *sql.Stmt
-	getAllValidatorsSigningEfficiencyStmt  *sql.Stmt
-	getConsensusEventStmt                  *sql.Stmt
-	getConsensusEventsByTypeStmt           *sql.Stmt
-	getConsensusEventsForHeightStmt        *sql.Stmt
-	getConsensusEventsForRoundStmt         *sql.Stmt
-	getHeightStmt                          *sql.Stmt
-	getHeightsStmt                         *sql.Stmt
-	getLatestHeightStmt                    *sql.Stmt
-	getMinHeightAfterTimeStmt              *sql.Stmt
-	getProposerPerformanceStmt             *sql.Stmt
-	getRecentConsensusEventsStmt           *sql.Stmt
-	getRecentRoundsStmt                    *sql.Stmt
-	getRoundStmt                           *sql.Stmt
-	getRoundsForHeightStmt                 *sql.Stmt
-	getRoundsInRangeStmt                   *sql.Stmt
-	getValidatorStmt                       *sql.Stmt
-	getValidatorConsensusParticipationStmt *sql.Stmt
-	getValidatorMissedBlockStreaksStmt     *sql.Stmt
-	getValidatorPerformanceTimeSeriesStmt  *sql.Stmt
-	getValidatorRankingStmt                *sql.Stmt
-	getValidatorSigningEfficiencyStmt      *sql.Stmt
-	getValidatorSnapshotStmt               *sql.Stmt
-	getValidatorSnapshotsForHeightStmt     *sql.Stmt
-	getValidatorSnapshotsForValidatorStmt  *sql.Stmt
-	getValidatorUptimeStmt                 *sql.Stmt
-	getValidatorsStmt                      *sql.Stmt
-	getValidatorsByHeightStmt              *sql.Stmt
-	getVoteStmt                            *sql.Stmt
-	getVotesByTypeStmt                     *sql.Stmt
-	getVotesForHeightStmt                  *sql.Stmt
-	getVotesForRoundStmt                   *sql.Stmt
-	getVotesForValidatorStmt               *sql.Stmt
-	getVotingPowerForRoundStmt             *sql.Stmt
-	updateRoundStepStmt                    *sql.Stmt
-	updateValidatorStmt                    *sql.Stmt
-	upsertHeightStmt                       *sql.Stmt
-	upsertRoundStmt                        *sql.Stmt
-	upsertValidatorStmt                    *sql.Stmt
-	upsertValidatorSnapshotStmt            *sql.Stmt
-	upsertVoteStmt                         *sql.Stmt
+	db                                      DBTX
+	tx                                      *sql.Tx
+	batchCreateValidatorSnapshotsStmt       *sql.Stmt
+	countConsensusEventsStmt                *sql.Stmt
+	countHeightsStmt                        *sql.Stmt
+	countHeightsInTimeWindowStmt            *sql.Stmt
+	countRoundsStmt                         *sql.Stmt
+	countValidatorSnapshotsStmt             *sql.Stmt
+	countValidatorsStmt                     *sql.Stmt
+	countVotesStmt                          *sql.Stmt
+	countVotesForValidatorInTimeWindowStmt  *sql.Stmt
+	createConsensusEventStmt                *sql.Stmt
+	createHeightStmt                        *sql.Stmt
+	createRoundStmt                         *sql.Stmt
+	createValidatorStmt                     *sql.Stmt
+	createValidatorSnapshotStmt             *sql.Stmt
+	createVoteStmt                          *sql.Stmt
+	deleteConsensusEventsOlderThanStmt      *sql.Stmt
+	deleteHeightsOlderThanStmt              *sql.Stmt
+	deleteRoundsOlderThanStmt               *sql.Stmt
+	deleteValidatorStmt                     *sql.Stmt
+	deleteValidatorSnapshotsOlderThanStmt   *sql.Stmt
+	deleteVotesOlderThanStmt                *sql.Stmt
+	getAllValidatorsSigningEfficiencyStmt   *sql.Stmt
+	getConsensusEventStmt                   *sql.Stmt
+	getConsensusEventsByTypeStmt            *sql.Stmt
+	getConsensusEventsForHeightStmt         *sql.Stmt
+	getConsensusEventsForRoundStmt          *sql.Stmt
+	getHeightStmt                           *sql.Stmt
+	getHeightsStmt                          *sql.Stmt
+	getLatestHeightStmt                     *sql.Stmt
+	getMinHeightAfterTimeStmt               *sql.Stmt
+	getProposerPerformanceStmt              *sql.Stmt
+	getRecentConsensusEventsStmt            *sql.Stmt
+	getRecentRoundsStmt                     *sql.Stmt
+	getRoundStmt                            *sql.Stmt
+	getRoundsForHeightStmt                  *sql.Stmt
+	getRoundsInRangeStmt                    *sql.Stmt
+	getValidatorStmt                        *sql.Stmt
+	getValidatorConsensusParticipationStmt  *sql.Stmt
+	getValidatorMissedBlockStreaksStmt      *sql.Stmt
+	getValidatorPerformanceTimeSeriesStmt   *sql.Stmt
+	getValidatorRankingStmt                 *sql.Stmt
+	getValidatorSigningEfficiencyStmt       *sql.Stmt
+	getValidatorSnapshotStmt                *sql.Stmt
+	getValidatorSnapshotsForHeightStmt      *sql.Stmt
+	getValidatorSnapshotsForValidatorStmt   *sql.Stmt
+	getValidatorUptimeStmt                  *sql.Stmt
+	getValidatorsStmt                       *sql.Stmt
+	getValidatorsByHeightStmt               *sql.Stmt
+	getVoteStmt                             *sql.Stmt
+	getVotesByTypeStmt                      *sql.Stmt
+	getVotesForHeightStmt                   *sql.Stmt
+	getVotesForRoundStmt                    *sql.Stmt
+	getVotesForValidatorStmt                *sql.Stmt
+	getVotingPowerForRoundStmt              *sql.Stmt
+	listAllValidatorsStmt                   *sql.Stmt
+	sampleHeightsStmt                       *sql.Stmt
+	sampleValidatorsStmt                    *sql.Stmt
+	sampleVotesStmt                         *sql.Stmt
+	sampleVotesForValidatorStmt             *sql.Stmt
+	searchValidatorsByOperatorOrMonikerStmt *sql.Stmt
+	updateRoundStepStmt                     *sql.Stmt
+	updateValidatorStmt                     *sql.Stmt
+	upsertHeightStmt                        *sql.Stmt
+	upsertRoundStmt                         *sql.Stmt
+	upsertValidatorStmt                     *sql.Stmt
+	upsertValidatorSnapshotStmt             *sql.Stmt
+	upsertVoteStmt                          *sql.Stmt
+	validatorExistsByOperatorStmt           *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                                     tx,
-		tx:                                     tx,
-		batchCreateValidatorSnapshotsStmt:      q.batchCreateValidatorSnapshotsStmt,
-		createConsensusEventStmt:               q.createConsensusEventStmt,
-		createHeightStmt:                       q.createHeightStmt,
-		createRoundStmt:                        q.createRoundStmt,
-		createValidatorStmt:                    q.createValidatorStmt,
-		createValidatorSnapshotStmt:            q.createValidatorSnapshotStmt,
-		createVoteStmt:                         q.createVoteStmt,
-		deleteConsensusEventsOlderThanStmt:     q.deleteConsensusEventsOlderThanStmt,
-		deleteHeightsOlderThanStmt:             q.deleteHeightsOlderThanStmt,
-		deleteRoundsOlderThanStmt:              q.deleteRoundsOlderThanStmt,
-		deleteValidatorStmt:                    q.deleteValidatorStmt,
-		deleteValidatorSnapshotsOlderThanStmt:  q.deleteValidatorSnapshotsOlderThanStmt,
-		deleteVotesOlderThanStmt:               q.deleteVotesOlderThanStmt,
-		getAllValidatorsSigningEfficiencyStmt:  q.getAllValidatorsSigningEfficiencyStmt,
-		getConsensusEventStmt:                  q.getConsensusEventStmt,
-		getConsensusEventsByTypeStmt:           q.getConsensusEventsByTypeStmt,
-		getConsensusEventsForHeightStmt:        q.getConsensusEventsForHeightStmt,
-		getConsensusEventsForRoundStmt:         q.getConsensusEventsForRoundStmt,
-		getHeightStmt:                          q.getHeightStmt,
-		getHeightsStmt:                         q.getHeightsStmt,
-		getLatestHeightStmt:                    q.getLatestHeightStmt,
-		getMinHeightAfterTimeStmt:              q.getMinHeightAfterTimeStmt,
-		getProposerPerformanceStmt:             q.getProposerPerformanceStmt,
-		getRecentConsensusEventsStmt:           q.getRecentConsensusEventsStmt,
-		getRecentRoundsStmt:                    q.getRecentRoundsStmt,
-		getRoundStmt:                           q.getRoundStmt,
-		getRoundsForHeightStmt:                 q.getRoundsForHeightStmt,
-		getRoundsInRangeStmt:                   q.getRoundsInRangeStmt,
-		getValidatorStmt:                       q.getValidatorStmt,
-		getValidatorConsensusParticipationStmt: q.getValidatorConsensusParticipationStmt,
-		getValidatorMissedBlockStreaksStmt:     q.getValidatorMissedBlockStreaksStmt,
-		getValidatorPerformanceTimeSeriesStmt:  q.getValidatorPerformanceTimeSeriesStmt,
-		getValidatorRankingStmt:                q.getValidatorRankingStmt,
-		getValidatorSigningEfficiencyStmt:      q.getValidatorSigningEfficiencyStmt,
-		getValidatorSnapshotStmt:               q.getValidatorSnapshotStmt,
-		getValidatorSnapshotsForHeightStmt:     q.getValidatorSnapshotsForHeightStmt,
-		getValidatorSnapshotsForValidatorStmt:  q.getValidatorSnapshotsForValidatorStmt,
-		getValidatorUptimeStmt:                 q.getValidatorUptimeStmt,
-		getValidatorsStmt:                      q.getValidatorsStmt,
-		getValidatorsByHeightStmt:              q.getValidatorsByHeightStmt,
-		getVoteStmt:                            q.getVoteStmt,
-		getVotesByTypeStmt:                     q.getVotesByTypeStmt,
-		getVotesForHeightStmt:                  q.getVotesForHeightStmt,
-		getVotesForRoundStmt:                   q.getVotesForRoundStmt,
-		getVotesForValidatorStmt:               q.getVotesForValidatorStmt,
-		getVotingPowerForRoundStmt:             q.getVotingPowerForRoundStmt,
-		updateRoundStepStmt:                    q.updateRoundStepStmt,
-		updateValidatorStmt:                    q.updateValidatorStmt,
-		upsertHeightStmt:                       q.upsertHeightStmt,
-		upsertRoundStmt:                        q.upsertRoundStmt,
-		upsertValidatorStmt:                    q.upsertValidatorStmt,
-		upsertValidatorSnapshotStmt:            q.upsertValidatorSnapshotStmt,
-		upsertVoteStmt:                         q.upsertVoteStmt,
+		db:                                      tx,
+		tx:                                      tx,
+		batchCreateValidatorSnapshotsStmt:       q.batchCreateValidatorSnapshotsStmt,
+		countConsensusEventsStmt:                q.countConsensusEventsStmt,
+		countHeightsStmt:                        q.countHeightsStmt,
+		countHeightsInTimeWindowStmt:            q.countHeightsInTimeWindowStmt,
+		countRoundsStmt:                         q.countRoundsStmt,
+		countValidatorSnapshotsStmt:             q.countValidatorSnapshotsStmt,
+		countValidatorsStmt:                     q.countValidatorsStmt,
+		countVotesStmt:                          q.countVotesStmt,
+		countVotesForValidatorInTimeWindowStmt:  q.countVotesForValidatorInTimeWindowStmt,
+		createConsensusEventStmt:                q.createConsensusEventStmt,
+		createHeightStmt:                        q.createHeightStmt,
+		createRoundStmt:                         q.createRoundStmt,
+		createValidatorStmt:                     q.createValidatorStmt,
+		createValidatorSnapshotStmt:             q.createValidatorSnapshotStmt,
+		createVoteStmt:                          q.createVoteStmt,
+		deleteConsensusEventsOlderThanStmt:      q.deleteConsensusEventsOlderThanStmt,
+		deleteHeightsOlderThanStmt:              q.deleteHeightsOlderThanStmt,
+		deleteRoundsOlderThanStmt:               q.deleteRoundsOlderThanStmt,
+		deleteValidatorStmt:                     q.deleteValidatorStmt,
+		deleteValidatorSnapshotsOlderThanStmt:   q.deleteValidatorSnapshotsOlderThanStmt,
+		deleteVotesOlderThanStmt:                q.deleteVotesOlderThanStmt,
+		getAllValidatorsSigningEfficiencyStmt:   q.getAllValidatorsSigningEfficiencyStmt,
+		getConsensusEventStmt:                   q.getConsensusEventStmt,
+		getConsensusEventsByTypeStmt:            q.getConsensusEventsByTypeStmt,
+		getConsensusEventsForHeightStmt:         q.getConsensusEventsForHeightStmt,
+		getConsensusEventsForRoundStmt:          q.getConsensusEventsForRoundStmt,
+		getHeightStmt:                           q.getHeightStmt,
+		getHeightsStmt:                          q.getHeightsStmt,
+		getLatestHeightStmt:                     q.getLatestHeightStmt,
+		getMinHeightAfterTimeStmt:               q.getMinHeightAfterTimeStmt,
+		getProposerPerformanceStmt:              q.getProposerPerformanceStmt,
+		getRecentConsensusEventsStmt:            q.getRecentConsensusEventsStmt,
+		getRecentRoundsStmt:                     q.getRecentRoundsStmt,
+		getRoundStmt:                            q.getRoundStmt,
+		getRoundsForHeightStmt:                  q.getRoundsForHeightStmt,
+		getRoundsInRangeStmt:                    q.getRoundsInRangeStmt,
+		getValidatorStmt:                        q.getValidatorStmt,
+		getValidatorConsensusParticipationStmt:  q.getValidatorConsensusParticipationStmt,
+		getValidatorMissedBlockStreaksStmt:      q.getValidatorMissedBlockStreaksStmt,
+		getValidatorPerformanceTimeSeriesStmt:   q.getValidatorPerformanceTimeSeriesStmt,
+		getValidatorRankingStmt:                 q.getValidatorRankingStmt,
+		getValidatorSigningEfficiencyStmt:       q.getValidatorSigningEfficiencyStmt,
+		getValidatorSnapshotStmt:                q.getValidatorSnapshotStmt,
+		getValidatorSnapshotsForHeightStmt:      q.getValidatorSnapshotsForHeightStmt,
+		getValidatorSnapshotsForValidatorStmt:   q.getValidatorSnapshotsForValidatorStmt,
+		getValidatorUptimeStmt:                  q.getValidatorUptimeStmt,
+		getValidatorsStmt:                       q.getValidatorsStmt,
+		getValidatorsByHeightStmt:               q.getValidatorsByHeightStmt,
+		getVoteStmt:                             q.getVoteStmt,
+		getVotesByTypeStmt:                      q.getVotesByTypeStmt,
+		getVotesForHeightStmt:                   q.getVotesForHeightStmt,
+		getVotesForRoundStmt:                    q.getVotesForRoundStmt,
+		getVotesForValidatorStmt:                q.getVotesForValidatorStmt,
+		getVotingPowerForRoundStmt:              q.getVotingPowerForRoundStmt,
+		listAllValidatorsStmt:                   q.listAllValidatorsStmt,
+		sampleHeightsStmt:                       q.sampleHeightsStmt,
+		sampleValidatorsStmt:                    q.sampleValidatorsStmt,
+		sampleVotesStmt:                         q.sampleVotesStmt,
+		sampleVotesForValidatorStmt:             q.sampleVotesForValidatorStmt,
+		searchValidatorsByOperatorOrMonikerStmt: q.searchValidatorsByOperatorOrMonikerStmt,
+		updateRoundStepStmt:                     q.updateRoundStepStmt,
+		updateValidatorStmt:                     q.updateValidatorStmt,
+		upsertHeightStmt:                        q.upsertHeightStmt,
+		upsertRoundStmt:                         q.upsertRoundStmt,
+		upsertValidatorStmt:                     q.upsertValidatorStmt,
+		upsertValidatorSnapshotStmt:             q.upsertValidatorSnapshotStmt,
+		upsertVoteStmt:                          q.upsertVoteStmt,
+		validatorExistsByOperatorStmt:           q.validatorExistsByOperatorStmt,
 	}
 }
