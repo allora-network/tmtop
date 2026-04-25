@@ -132,54 +132,76 @@ func (d *DB) migrate() error {
 	return nil
 }
 
-// CleanupOldData removes data older than the configured retention period.
+// CleanupOldData removes data older than the configured retention
+// period. Both MaxRetainBlocks and MaxRetainDays are honored — when
+// both are set, the more aggressive (higher) cutoff wins so retention
+// is bounded by the shorter window.
 func (d *DB) CleanupOldData(ctx context.Context, config Config) error {
-	var cutoffHeight int64
-
-	if config.MaxRetainBlocks > 0 {
-		// Get latest height and calculate cutoff
-		latest, err := d.queries.GetLatestHeight(ctx)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil // No data to clean up
-			}
-			return fmt.Errorf("failed to get latest height: %w", err)
-		}
-		cutoffHeight = latest.Height - config.MaxRetainBlocks
-	} else if config.MaxRetainDays > 0 {
-		// Calculate cutoff based on days
-		_ = time.Now().AddDate(0, 0, -config.MaxRetainDays)
-		// This is a simplified approach - in a real implementation you'd want to
-		// find the height that corresponds to the cutoff time
-		cutoffHeight = 0 // For now, we'll rely on MaxRetainBlocks
-	} else {
-		return nil // No cleanup configured
+	cutoffHeight, err := d.computeCutoffHeight(ctx, config)
+	if err != nil {
+		return err
 	}
-
 	if cutoffHeight <= 0 {
 		return nil
 	}
 
-	// Clean up old data in order (due to foreign key constraints)
+	// Order matters here — foreign keys reference heights/validators.
 	if err := d.queries.DeleteConsensusEventsOlderThan(ctx, cutoffHeight); err != nil {
 		return fmt.Errorf("failed to delete old consensus events: %w", err)
 	}
-
 	if err := d.queries.DeleteVotesOlderThan(ctx, cutoffHeight); err != nil {
 		return fmt.Errorf("failed to delete old votes: %w", err)
 	}
-
 	if err := d.queries.DeleteValidatorSnapshotsOlderThan(ctx, cutoffHeight); err != nil {
 		return fmt.Errorf("failed to delete old validator snapshots: %w", err)
 	}
-
 	if err := d.queries.DeleteRoundsOlderThan(ctx, cutoffHeight); err != nil {
 		return fmt.Errorf("failed to delete old rounds: %w", err)
 	}
-
 	if err := d.queries.DeleteHeightsOlderThan(ctx, cutoffHeight); err != nil {
 		return fmt.Errorf("failed to delete old heights: %w", err)
 	}
-
 	return nil
+}
+
+func (d *DB) computeCutoffHeight(ctx context.Context, config Config) (int64, error) {
+	var cutoffs []int64
+
+	if config.MaxRetainBlocks > 0 {
+		latest, err := d.queries.GetLatestHeight(ctx)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return 0, nil
+			}
+			return 0, fmt.Errorf("failed to get latest height: %w", err)
+		}
+		cutoffs = append(cutoffs, latest.Height-config.MaxRetainBlocks)
+	}
+
+	if config.MaxRetainDays > 0 {
+		cutoffTime := time.Now().AddDate(0, 0, -config.MaxRetainDays)
+		// MIN(height) returns NULL when no row matches; sqlc surfaces
+		// that as interface{}.
+		raw, err := d.queries.GetMinHeightAfterTime(ctx, sql.NullTime{Time: cutoffTime, Valid: true})
+		if err != nil && err != sql.ErrNoRows {
+			return 0, fmt.Errorf("failed to get height for time cutoff: %w", err)
+		}
+		if h, ok := raw.(int64); ok && h > 0 {
+			cutoffs = append(cutoffs, h-1)
+		}
+	}
+
+	if len(cutoffs) == 0 {
+		return 0, nil
+	}
+
+	// Most aggressive cutoff wins so retention is bounded by the
+	// tighter of the two configured windows.
+	cutoff := cutoffs[0]
+	for _, c := range cutoffs[1:] {
+		if c > cutoff {
+			cutoff = c
+		}
+	}
+	return cutoff, nil
 }

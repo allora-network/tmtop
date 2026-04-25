@@ -24,3 +24,8 @@ RETURNING *;
 
 -- name: DeleteHeightsOlderThan :exec
 DELETE FROM heights WHERE height < ?;
+
+-- name: GetMinHeightAfterTime :one
+-- Returns the smallest height that was inserted at or after the given time.
+-- Used by retention cleanup to translate a time-based cutoff into a height-based one.
+SELECT MIN(height) AS height FROM heights WHERE created_at >= ?;
