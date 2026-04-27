@@ -32,6 +32,11 @@ func (c *Client) join(host, rest string) string {
 	ref, _ := url.Parse(rest)
 
 	base.Path = path.Join(base.Path, ref.Path)
+	// Preserve query and fragment from the relative URL — without
+	// this, /abci_query?path=...&data=... loses its payload and
+	// /validators?page=N silently falls back to page 1.
+	base.RawQuery = ref.RawQuery
+	base.Fragment = ref.Fragment
 	return base.String()
 }
 
