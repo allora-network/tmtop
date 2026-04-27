@@ -66,7 +66,9 @@ func (rpc *CometRPC) request(path string, target any) error {
 		return fmt.Errorf("JSON-RPC error from %s%s: %w", url, path, response.Error)
 	}
 
-	if err := cmtjson.Unmarshal(response.Result, &target); err != nil {
+	// target is already a pointer (callers pass &someStruct). Passing
+	// &target would give cmtjson a *any, which it can't unmarshal into.
+	if err := cmtjson.Unmarshal(response.Result, target); err != nil {
 		return fmt.Errorf("decoding JSON-RPC result from %s%s: %w", url, path, err)
 	}
 	return nil
