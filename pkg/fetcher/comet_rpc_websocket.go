@@ -16,12 +16,23 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// CometRPCWebsocket maintains a single websocket connection to a
+// CometBFT node, redialing on failure and resubscribing automatically.
+//
+// gorilla/websocket allows one concurrent reader and one concurrent
+// writer, so we use that:
+//   - The reader is the connectionManager goroutine. No mutex needed
+//     on reads — only one reader exists.
+//   - Writers (Subscribe, plus the resubscribe loop in resetConnection)
+//     serialize on muWrite. resetConnection takes muWrite for the
+//     full reconnect so writers from other goroutines block until
+//     the new conn is in place and resubscribed.
 type CometRPCWebsocket struct {
 	url    string
 	logger zerolog.Logger
 
-	conn   *websocket.Conn
-	muConn *sync.Mutex
+	conn    *websocket.Conn
+	muWrite sync.Mutex
 
 	subIDNonce atomic.Int64
 	subs       *butils.SyncMap[int, sub]
@@ -55,7 +66,6 @@ func NewCometRPCWebsocket(rpcURL string, logger zerolog.Logger) *CometRPCWebsock
 	ws := &CometRPCWebsocket{
 		url:    url,
 		logger: cometLogger,
-		muConn: &sync.Mutex{},
 		subs:   butils.NewSyncMap[int, sub](),
 		chStop: make(chan struct{}),
 		wgDone: &sync.WaitGroup{},
@@ -93,6 +103,11 @@ func (ws *CometRPCWebsocket) connectionManager() {
 	}
 }
 
+// readConnection is the single reader. No mutex on reads — gorilla
+// supports concurrent read+write, and only this goroutine reads.
+//
+// Returns when chStop closes or when ReadJSON fails (so
+// connectionManager can reset the connection).
 func (ws *CometRPCWebsocket) readConnection() {
 	defer func() {
 		if perr := recover(); perr != nil {
@@ -108,22 +123,22 @@ func (ws *CometRPCWebsocket) readConnection() {
 		}
 
 		var resp jsonrpctypes.RPCResponse
-		err := ws.read(&resp)
-		if err != nil {
-			ws.logger.Error().Err(err).Msg("could not read websocket msg")
-			continue
-		} else if resp.Error != nil {
+		if err := ws.conn.ReadJSON(&resp); err != nil {
+			ws.logger.Error().Err(err).Msg("websocket read failed; will reconnect")
+			return
+		}
+		if resp.Error != nil {
 			ws.logger.Error().Err(*resp.Error).Msg("rpc received error")
 			continue
 		}
 
 		if string(resp.Result) == "{}" {
+			// Acknowledgment of subscription request.
 			continue
 		}
 
 		var event rpctypes.ResultEvent
-		err = cmtjson.Unmarshal(resp.Result, &event)
-		if err != nil {
+		if err := cmtjson.Unmarshal(resp.Result, &event); err != nil {
 			ws.logger.Error().Err(err).Msg("could not unmarshal websocket msg")
 			continue
 		}
@@ -144,30 +159,23 @@ func (ws *CometRPCWebsocket) readConnection() {
 	}
 }
 
-func (ws *CometRPCWebsocket) read(resp any) error {
-	ws.muConn.Lock()
-	defer ws.muConn.Unlock()
-
-	return ws.conn.ReadJSON(&resp)
-}
-
+// resetConnection redials the websocket and replays all live
+// subscriptions. Holds muWrite for the duration so concurrent
+// Subscribe calls block until the new connection is in place.
+//
+// Called only from connectionManager after readConnection returns,
+// so there is never a concurrent reader to worry about.
 func (ws *CometRPCWebsocket) resetConnection() {
-	ws.muConn.Lock()
-	defer ws.muConn.Unlock()
+	ws.muWrite.Lock()
+	defer ws.muWrite.Unlock()
 
-	// close connection if active
 	if ws.conn != nil {
-		ws.logger.Info().Msg("websocket connection closed, reconnecting...")
-		err := ws.conn.Close()
-		if err != nil {
+		if err := ws.conn.Close(); err != nil {
 			ws.logger.Error().Err(err).Msg("error closing websocket connection")
-		} else {
-			ws.logger.Info().Msg("websocket connection closed, reconnecting...")
 		}
 		ws.conn = nil
 	}
 
-	// wait for a new connection
 	for {
 		conn, _, err := websocket.DefaultDialer.Dial(ws.url, nil)
 		if err != nil {
@@ -179,28 +187,28 @@ func (ws *CometRPCWebsocket) resetConnection() {
 			}
 			continue
 		}
-
 		ws.conn = conn
 		break
 	}
 
 	ws.logger.Info().Str("url", ws.conn.RemoteAddr().String()).Msg("connected to comet rpc websocket")
 
-	// resubscribe to everything (caller holds muConn)
+	// Resubscribe everything that was live before the disconnect.
+	// We hold muWrite so this is safe.
 	for _, sub := range ws.subs.Iter() {
-		ws.logger.Debug().Msgf("subscribing to subscription ID %d with events %v", sub.id, sub.events)
-		ws.sendSubscribeMsgLocked(sub)
+		ws.logger.Debug().Msgf("resubscribing to subscription ID %d with events %v", sub.id, sub.events)
+		ws.writeSubscribeLocked(sub)
 	}
 }
 
-// terminateConnection closes the websocket connection and cleans up resources permanently.
+// terminateConnection closes the websocket permanently. Holds
+// muWrite to ensure no in-flight writer is mid-WriteJSON.
 func (ws *CometRPCWebsocket) terminateConnection() {
-	ws.muConn.Lock()
-	defer ws.muConn.Unlock()
+	ws.muWrite.Lock()
+	defer ws.muWrite.Unlock()
 
 	if ws.conn != nil {
-		err := ws.conn.Close()
-		if err != nil {
+		if err := ws.conn.Close(); err != nil {
 			ws.logger.Error().Err(err).Msg("error closing websocket connection, giving up")
 		} else {
 			ws.logger.Info().Msg("websocket connection closed")
@@ -209,22 +217,31 @@ func (ws *CometRPCWebsocket) terminateConnection() {
 	}
 }
 
+// Subscribe registers an event subscription and sends the SUBSCRIBE
+// message on the websocket. Safe to call from any goroutine.
 func (ws *CometRPCWebsocket) Subscribe(mb *butils.Mailbox[ctypes.TMEventData], events ...string) {
 	sub := sub{
 		id:     int(ws.subIDNonce.Add(1)),
 		events: events,
 		mb:     mb,
 	}
-
 	ws.subs.Set(sub.id, sub)
 
-	ws.muConn.Lock()
-	defer ws.muConn.Unlock()
-	ws.sendSubscribeMsgLocked(sub)
+	ws.muWrite.Lock()
+	defer ws.muWrite.Unlock()
+	ws.writeSubscribeLocked(sub)
 }
 
-// sendSubscribeMsgLocked writes a subscription message. Caller must hold ws.muConn.
-func (ws *CometRPCWebsocket) sendSubscribeMsgLocked(sub sub) {
+// writeSubscribeLocked sends a SUBSCRIBE frame. Caller MUST hold
+// muWrite — this is enforced by convention; callers are
+// resetConnection (which Locks the full reconnect) and Subscribe.
+func (ws *CometRPCWebsocket) writeSubscribeLocked(sub sub) {
+	if ws.conn == nil {
+		// Mid-reset; the resubscribe loop in resetConnection will
+		// pick this up once the new conn is in place.
+		return
+	}
+
 	subMsg := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "subscribe",
@@ -236,8 +253,7 @@ func (ws *CometRPCWebsocket) sendSubscribeMsgLocked(sub sub) {
 
 	ws.logger.Info().Msg("subscribing to " + strings.Join(sub.events, ","))
 
-	err := ws.conn.WriteJSON(subMsg)
-	if err != nil {
+	if err := ws.conn.WriteJSON(subMsg); err != nil {
 		ws.logger.Error().Err(err).Msg("could not write subscription message")
 	}
 }
