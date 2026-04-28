@@ -209,8 +209,8 @@ func (a *App) Stop(ctx context.Context) error {
 
 func (a *App) ServeTopology() {
 	a.topologyServer = tmhttp.NewServer(
-		// a.Config.TopologyListenAddr,
-		":8001",
+		a.Config.TopologyListenAddr,
+		//":8080",
 		topology.WithHTTPTopologyAPI(a.State),
 		topology.WithHTTPPeersAPI(a.State),
 		topology.WithHTTPDebugAPI(a.State),
