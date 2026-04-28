@@ -264,12 +264,12 @@ func (a *App) RefreshConsensus() {
 	a.State.SetConsensusStateError(nil)
 
 	if consensus != nil {
-		ctx := context.Background()
+		a.State.SetConsensusHeight(consensus.Height, int64(consensus.Round), int64(consensus.Step), consensus.StartTime)
 
+		ctx := context.Background()
 		if err := a.ConsensusStore.StoreValidators(ctx, consensus.Height, vals); err != nil {
 			a.Logger.Error().Err(err).Int64("height", consensus.Height).Msg("Failed to persist validators to database")
 		}
-
 		for hr, roundData := range a.State.VotesByRound.Iter() {
 			if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, vals); err != nil {
 				a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
