@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 	"net/url"
-	"reflect"
 	"strconv"
 	"time"
 
@@ -11,17 +10,17 @@ import (
 )
 
 type NetInfo struct {
-	Listening bool     `mapstructure:"listening"`
-	Listeners []string `mapstructure:"listeners"`
-	NPeers    string   `mapstructure:"n_peers"`
-	Peers     []Peer   `mapstructure:"peers"`
+	Listening bool     `json:"listening"`
+	Listeners []string `json:"listeners"`
+	NPeers    string   `json:"n_peers"`
+	Peers     []Peer   `json:"peers"`
 }
 
 type Peer struct {
-	NodeInfo         DefaultNodeInfo  `mapstructure:"node_info"`
-	IsOutbound       bool             `mapstructure:"is_outbound"`
-	ConnectionStatus ConnectionStatus `mapstructure:"connection_status"`
-	RemoteIP         string           `mapstructure:"remote_ip"`
+	NodeInfo         DefaultNodeInfo  `json:"node_info"`
+	IsOutbound       bool             `json:"is_outbound"`
+	ConnectionStatus ConnectionStatus `json:"connection_status"`
+	RemoteIP         string           `json:"remote_ip"`
 }
 
 func (p Peer) URL() string {
@@ -33,33 +32,31 @@ func (p Peer) URL() string {
 }
 
 type DefaultNodeInfo struct {
-	ProtocolVersion ProtocolVersion `mapstructure:"protocol_version"`
+	ProtocolVersion ProtocolVersion `json:"protocol_version"`
 
 	// Authenticate
-	// TODO: replace with NetAddress
-	DefaultNodeID ID     `mapstructure:"id"`          // authenticated identifier
-	ListenAddr    string `mapstructure:"listen_addr"` // accepting incoming
+	DefaultNodeID ID     `json:"id"`          // authenticated identifier
+	ListenAddr    string `json:"listen_addr"` // accepting incoming
 
 	// Check compatibility.
-	// Channels are HexBytes so easier to read as JSON
-	Network  string            `mapstructure:"network"`  // network/chain ID
-	Version  string            `mapstructure:"version"`  // major.minor.revision
-	Channels cmtbytes.HexBytes `mapstructure:"channels"` // channels this node knows about
+	Network  string            `json:"network"`  // network/chain ID
+	Version  string            `json:"version"`  // major.minor.revision
+	Channels cmtbytes.HexBytes `json:"channels"` // channels this node knows about
 
 	// ASCIIText fields
-	Moniker string               `mapstructure:"moniker"` // arbitrary moniker
-	Other   DefaultNodeInfoOther `mapstructure:"other"`   // other application specific data
+	Moniker string               `json:"moniker"` // arbitrary moniker
+	Other   DefaultNodeInfoOther `json:"other"`   // other application specific data
 }
 
 type DefaultNodeInfoOther struct {
-	TxIndex    string `mapstructure:"tx_index"`
-	RPCAddress string `mapstructure:"rpc_address"`
+	TxIndex    string `json:"tx_index"`
+	RPCAddress string `json:"rpc_address"`
 }
 
 type ProtocolVersion struct {
-	P2P   int64 `mapstructure:"p2p"`
-	Block int64 `mapstructure:"block"`
-	App   int64 `mapstructure:"app"`
+	P2P   int64 `json:"p2p"`
+	Block int64 `json:"block"`
+	App   int64 `json:"app"`
 }
 
 type ID string
@@ -136,25 +133,6 @@ func (ct *CustomTime) UnmarshalJSON(b []byte) error {
 
 	ct.Time = t
 	return nil
-}
-
-func StringToCustomTimeHookFunc(
-	f reflect.Type,
-	t reflect.Type,
-	data any,
-) (any, error) {
-	if f.Kind() != reflect.String {
-		return data, nil
-	} else if t != reflect.TypeOf(CustomTime{}) {
-		return data, nil
-	}
-
-	str := data.(string)
-	result, err := time.Parse("2006-01-02T15:04:05.99Z", str)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse time: %v", err)
-	}
-	return CustomTime{Time: result}, nil
 }
 
 func (ct CustomTime) String() string {
