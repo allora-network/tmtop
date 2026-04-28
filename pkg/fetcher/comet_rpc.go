@@ -3,6 +3,7 @@ package fetcher
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,12 +81,52 @@ func (rpc *CometRPC) GetConsensusState() (*cnstypes.RoundState, error) {
 		return nil, err
 	}
 
-	var state cnstypes.RoundState
-	if err := cmtjson.Unmarshal(response.RoundState, &state); err != nil {
+	// /consensus_state returns RoundStateSimple, NOT the full RoundState.
+	// Height/Round/Step are encoded as a single "X/Y/Z" string and the
+	// proposer lives at the top level (not nested in Validators). Decoding
+	// straight into RoundState silently produces zeros for everything
+	// callers actually need. Decode into the right shape and project.
+	var simple cnstypes.RoundStateSimple
+	if err := cmtjson.Unmarshal(response.RoundState, &simple); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal round state: %w", err)
 	}
 
-	return &state, nil
+	height, round, step, err := parseHeightRoundStep(simple.HeightRoundStep)
+	if err != nil {
+		return nil, fmt.Errorf("parsing height/round/step %q: %w", simple.HeightRoundStep, err)
+	}
+
+	return &cnstypes.RoundState{
+		Height:    height,
+		Round:     round,
+		Step:      step,
+		StartTime: simple.StartTime,
+		Validators: &ctypes.ValidatorSet{
+			Proposer: &ctypes.Validator{Address: simple.Proposer.Address},
+		},
+	}, nil
+}
+
+// parseHeightRoundStep splits the compressed "height/round/step" string
+// (e.g. "8990959/0/1") that /consensus_state returns into its parts.
+func parseHeightRoundStep(s string) (height int64, round int32, step cnstypes.RoundStepType, err error) {
+	parts := strings.Split(s, "/")
+	if len(parts) != 3 {
+		return 0, 0, 0, fmt.Errorf("expected 3 parts, got %d", len(parts))
+	}
+	h, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("height: %w", err)
+	}
+	r, err := strconv.ParseInt(parts[1], 10, 32)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("round: %w", err)
+	}
+	st, err := strconv.ParseUint(parts[2], 10, 8)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("step: %w", err)
+	}
+	return h, int32(r), cnstypes.RoundStepType(st), nil
 }
 
 func (rpc *CometRPC) GetValidators() ([]*ctypes.Validator, error) {
