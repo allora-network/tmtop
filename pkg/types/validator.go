@@ -16,9 +16,22 @@ type TMValidator struct {
 	PeerID             p2p.ID     // P2P network ID
 }
 
-// GetDisplayAddress returns the best available address for display.
+// GetDisplayAddress returns the validator's hex consensus address —
+// the canonical key used by CometBFT for votes, proposers, and
+// peer-level identity. This is what goes into VotesByRound and the
+// DB's hex_address column. Display *names* go through GetDisplayName
+// (moniker / bech32 / truncated hex).
+//
+// Falls back to the bech32 operator address only if the comet
+// validator info is missing (e.g. tendermint-only chains).
 func (v TMValidator) GetDisplayAddress() string {
-	return v.CosmosValidator.OperatorAddress
+	if v.CometValidator != nil {
+		return v.CometValidator.Address.String()
+	}
+	if v.CosmosValidator != nil {
+		return v.CosmosValidator.OperatorAddress
+	}
+	return ""
 }
 
 // GetDisplayName returns the best available name for display.
