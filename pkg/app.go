@@ -266,6 +266,18 @@ func (a *App) RefreshConsensus() {
 	if consensus != nil {
 		a.State.SetConsensusHeight(consensus.Height, int64(consensus.Round), int64(consensus.Step), consensus.StartTime)
 
+		// Seed the proposer for (height, round) directly from
+		// /consensus_state. NewRound websocket events only fire at
+		// round transitions, so without this seed the proposer-row
+		// highlight stays empty at startup and after reconnects.
+		if consensus.Validators != nil && consensus.Validators.Proposer != nil {
+			a.State.VotesByRound.AddProposer(
+				consensus.Height,
+				consensus.Round,
+				consensus.Validators.Proposer.Address.String(),
+			)
+		}
+
 		ctx := context.Background()
 		if err := a.ConsensusStore.StoreValidators(ctx, consensus.Height, vals); err != nil {
 			a.Logger.Error().Err(err).Int64("height", consensus.Height).Msg("Failed to persist validators to database")

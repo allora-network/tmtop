@@ -17,6 +17,20 @@ import (
 //go:embed migrations/001_initial.sql
 var migration001Initial string
 
+//go:embed migrations/002_drop_operator_unique.sql
+var migration002DropOperatorUnique string
+
+// migrations is the ordered list of schema migrations. Each entry's
+// SQL is executed only once; the version name is recorded in the
+// migrations table.
+var migrations = []struct {
+	version string
+	sql     string
+}{
+	{"001_initial", migration001Initial},
+	{"002_drop_operator_unique", migration002DropOperatorUnique},
+}
+
 type DB struct {
 	db      *sql.DB
 	queries *sqlc.Queries
@@ -95,9 +109,9 @@ func (d *DB) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	return nil
 }
 
-// migrate runs database migrations.
+// migrate runs each migration once, in order, recording its version
+// in the migrations table.
 func (d *DB) migrate() error {
-	// Create migrations table if it doesn't exist
 	createMigrationsTable := `
 		CREATE TABLE IF NOT EXISTS migrations (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,33 +119,26 @@ func (d *DB) migrate() error {
 			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 	`
-
 	if _, err := d.db.Exec(createMigrationsTable); err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
-	// Check if migration 001_initial has been applied
-	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM migrations WHERE version = '001_initial'").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check migration status: %w", err)
-	}
+	for _, m := range migrations {
+		var count int
+		if err := d.db.QueryRow("SELECT COUNT(*) FROM migrations WHERE version = ?", m.version).Scan(&count); err != nil {
+			return fmt.Errorf("checking migration %s: %w", m.version, err)
+		}
+		if count > 0 {
+			continue
+		}
 
-	// If migration already applied, skip it
-	if count > 0 {
-		return nil
+		if _, err := d.db.Exec(m.sql); err != nil {
+			return fmt.Errorf("applying migration %s: %w", m.version, err)
+		}
+		if _, err := d.db.Exec("INSERT INTO migrations (version) VALUES (?)", m.version); err != nil {
+			return fmt.Errorf("recording migration %s: %w", m.version, err)
+		}
 	}
-
-	if _, err := d.db.Exec(migration001Initial); err != nil {
-		return fmt.Errorf("failed to execute migration: %w", err)
-	}
-
-	// Record that migration was applied
-	_, err = d.db.Exec("INSERT INTO migrations (version) VALUES ('001_initial')")
-	if err != nil {
-		return fmt.Errorf("failed to record migration: %w", err)
-	}
-
 	return nil
 }
 
