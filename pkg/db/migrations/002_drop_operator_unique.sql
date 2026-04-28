@@ -10,7 +10,21 @@
 -- it references the validator's hex_address.
 --
 -- SQLite has no ALTER TABLE DROP CONSTRAINT, so we recreate the
--- table without the constraint and copy the data over.
+-- table without the constraint and copy the data over. Foreign
+-- keys must be disabled during the rebuild because DROP TABLE on
+-- a table referenced by other tables triggers ON DELETE NO ACTION
+-- and fails (SQLITE_CONSTRAINT_FOREIGNKEY 787). PRAGMA foreign_keys
+-- is a no-op inside a transaction, so it is set outside BEGIN/COMMIT.
+-- See https://www.sqlite.org/lang_altertable.html#otheralter
+
+PRAGMA foreign_keys=OFF;
+
+-- Idempotent recovery: a prior failed run of this migration may
+-- have left validators_new behind because each statement in a
+-- multi-statement migration autocommits.
+DROP TABLE IF EXISTS validators_new;
+
+BEGIN TRANSACTION;
 
 CREATE TABLE validators_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,3 +45,7 @@ ALTER TABLE validators_new RENAME TO validators;
 
 CREATE INDEX idx_validators_hex_address ON validators(hex_address);
 CREATE INDEX idx_validators_operator_address ON validators(operator_address);
+
+COMMIT;
+
+PRAGMA foreign_keys=ON;
