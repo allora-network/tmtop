@@ -243,10 +243,19 @@ func (w *Wrapper) Start() error {
 	_, _ = fmt.Fprint(w.ProgressTextView, "Loading...")
 
 	w.App.SetAfterDrawFunc(func(screen tcell.Screen) {
+		// LastRoundTable isn't drawn until the user switches to its mode,
+		// so its inner rect is 0 at startup under the default mode. Only
+		// override the seeded default (DefaultColumnsCount) when we
+		// actually have a real width to compute from, otherwise we'd
+		// leave the table with zero columns and render nothing.
 		_, _, width, _ := w.LastRoundTable.GetInnerRect()
-		columns := width / 50
-		w.LastRoundTableData.SetColumnsCount(columns)
-
+		if width > 0 {
+			columns := width / 50
+			if columns < 1 {
+				columns = 1
+			}
+			w.LastRoundTableData.SetColumnsCount(columns)
+		}
 		w.App.SetAfterDrawFunc(nil)
 	})
 
@@ -298,6 +307,14 @@ func (w *Wrapper) SetState(state *types.State) {
 			w.AllRoundsTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
 			w.AllRoundsTableData.Update()
+			// Pin the view to the top of the validator list. Tview's
+			// Table auto-enables trackEnd whenever the data length from
+			// the current row offset doesn't fill the visible area, which
+			// in practice scrolls validators 1..N off the top and shows
+			// only the bottom slice. The proposer is normally one of the
+			// top-VP validators, so it would be the slice that gets
+			// hidden — and the green row highlight ends up off-screen.
+			w.AllRoundsTable.ScrollToBeginning()
 		}
 		w.NetInfoTableData.SetNetInfo(state.GetNetInfo())
 		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
@@ -357,6 +374,21 @@ func (w *Wrapper) ChangeMode() {
 	}
 
 	w.Redraw()
+
+	// LastRoundTable's column count was seeded at startup before its
+	// inner rect had real dimensions (it wasn't visible yet). Now that
+	// it's about to be drawn, recompute against the real width so the
+	// validator grid actually fills the pane.
+	if w.Mode == ModeLastRound {
+		_, _, width, _ := w.LastRoundTable.GetInnerRect()
+		if width > 0 {
+			columns := width / 50
+			if columns < 1 {
+				columns = 1
+			}
+			w.LastRoundTableData.SetColumnsCount(columns)
+		}
+	}
 }
 
 func (w *Wrapper) Redraw() {
