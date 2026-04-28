@@ -20,6 +20,7 @@ type AllRoundsTableData struct {
 	DisableEmojis bool
 	Transpose     bool
 	CurrentHeight int64
+	CurrentRound  int32
 
 	cells [][]*tview.TableCell
 	mutex *utils.NoopLocker
@@ -78,6 +79,15 @@ func (d *AllRoundsTableData) SetTMValidators(validators types.TMValidators, heig
 	d.mutex.Unlock()
 }
 
+// SetCurrentRound records the round number we should treat as "now"
+// for proposer-row highlighting.
+func (d *AllRoundsTableData) SetCurrentRound(height int64, round int32) {
+	d.mutex.Lock()
+	d.CurrentHeight = height
+	d.CurrentRound = round
+	d.mutex.Unlock()
+}
+
 func (d *AllRoundsTableData) SetRoundData(roundData *types.RoundDataMap) {
 	d.mutex.Lock()
 	d.RoundData = roundData
@@ -131,14 +141,25 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	}
 	cells = append(cells, headerRow)
 
+	// Identify the current proposer (if any) so we can highlight the
+	// whole row across the screen, not just the per-round proposer cell.
+	currentProposers := d.RoundData.GetProposers(d.CurrentHeight, d.CurrentRound)
+
 	// Create validator rows using TMValidators
 	for i, validator := range d.Validators {
 		row := []*tview.TableCell{}
 
+		isCurrentProposer := currentProposers != nil && currentProposers.Has(validator.GetDisplayAddress())
+
 		// enumerated validator name
 		name := validator.GetDisplayName()
-		row = append(row, tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name)))
-		row = append(row, tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent)))
+		nameCell := tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name))
+		vpCell := tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent))
+		if isCurrentProposer {
+			nameCell.SetBackgroundColor(tcell.ColorForestGreen)
+			vpCell.SetBackgroundColor(tcell.ColorForestGreen)
+		}
+		row = append(row, nameCell, vpCell)
 
 		for _, roundData := range d.RoundData.ReverseIter() {
 			valVotes := roundData.Votes[validator.GetDisplayAddress()]
@@ -148,7 +169,12 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 			precommit := types.VoteStateFromVotesMap(valVotes, cmtproto.PrecommitType)
 
 			cell := tview.NewTableCell(" " + precommit.Serialize(d.DisableEmojis) + prevote.Serialize(d.DisableEmojis) + " ")
-			if roundData.Proposers.Has(validator.GetDisplayAddress()) {
+			// Two highlight conditions, both green:
+			//   1. This validator is the proposer for the current
+			//      (in-progress) height/round — entire row gets the bar.
+			//   2. This validator was the proposer for THIS specific
+			//      historical round — just that round's cell.
+			if isCurrentProposer || roundData.Proposers.Has(validator.GetDisplayAddress()) {
 				cell.SetBackgroundColor(tcell.ColorForestGreen)
 			}
 			row = append(row, cell)

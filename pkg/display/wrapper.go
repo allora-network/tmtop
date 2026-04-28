@@ -295,6 +295,7 @@ func (w *Wrapper) SetState(state *types.State) {
 		w.LastRoundTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 		if w.AllRoundsTableData != nil {
 			w.AllRoundsTableData.SetTMValidators(validators, consensusHeight)
+			w.AllRoundsTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
 			w.AllRoundsTableData.Update()
 		}
