@@ -32,7 +32,7 @@ function App() {
 
     useEffect(() => {
         let max = (apiData.conns || []).reduce((max, conn) => {
-            let total = conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate
+            let total = conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate
             if (total > max) {
                 return total
             }
@@ -46,13 +46,13 @@ function App() {
         }))
 
         const edges = (apiData.conns || [])
-            .filter(conn => conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate >= (minBytesSec || 0).valueOf())
+            .filter(conn => conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate >= (minBytesSec || 0).valueOf())
             .map(conn => ({
                 source: conn.from,
                 target: conn.to,
                 id: `${conn.from}-${conn.to}`,
-                label: clickedEdges[`${conn.from}-${conn.to}`] ? `${humanizeBytes(conn.connectionStatus.send_monitor.avg_rate)}/s\n${humanizeBytes(conn.connectionStatus.recv_monitor.avg_rate)}/s` : '',
-                size: (conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate) / max * 5,
+                label: clickedEdges[`${conn.from}-${conn.to}`] ? `${humanizeBytes(conn.connectionStatus.SendMonitor.AvgRate)}/s\n${humanizeBytes(conn.connectionStatus.RecvMonitor.AvgRate)}/s` : '',
+                size: (conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate) / max * 5,
             }))
 
         let copy = [...nodes]
@@ -321,8 +321,8 @@ function NodeDetails({ node }: { node: NodeWithPeers }) {
                         <tr key={index}>
                             <td>{peerInfo.peer?.moniker || 'Unknown'}</td>
                             <td>{peerInfo.isOutbound ? 'Outbound' : 'Inbound'}</td>
-                            <td>{humanizeBytes(peerInfo.connectionStatus.send_monitor.avg_rate)}/s</td>
-                            <td>{humanizeBytes(peerInfo.connectionStatus.recv_monitor.avg_rate)}/s</td>
+                            <td>{humanizeBytes(peerInfo.connectionStatus.SendMonitor.AvgRate)}/s</td>
+                            <td>{humanizeBytes(peerInfo.connectionStatus.RecvMonitor.AvgRate)}/s</td>
                         </tr>
                     ))}
                 </tbody>
@@ -330,8 +330,8 @@ function NodeDetails({ node }: { node: NodeWithPeers }) {
             <h3>Connection Statistics</h3>
             <table>
                 <tbody>
-                    <tr><td>Total Send Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.send_monitor.avg_rate, 0))}/s</td></tr>
-                    <tr><td>Total Receive Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.recv_monitor.avg_rate, 0))}/s</td></tr>
+                    <tr><td>Total Send Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.SendMonitor.AvgRate, 0))}/s</td></tr>
+                    <tr><td>Total Receive Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.RecvMonitor.AvgRate, 0))}/s</td></tr>
                     <tr><td>Outbound Connections:</td><td>{node.connectedPeers.filter(peer => peer.isOutbound).length}</td></tr>
                     <tr><td>Inbound Connections:</td><td>{node.connectedPeers.filter(peer => !peer.isOutbound).length}</td></tr>
                 </tbody>

@@ -61,51 +61,57 @@ type ProtocolVersion struct {
 
 type ID string
 
+// JSON keys inside ConnectionStatus / FlowStatus / ChannelStatus are
+// PascalCase because CometBFT's libs/flowrate and ConnectionStatus
+// types upstream don't define json tags, so the encoder uses Go field
+// names verbatim. cmtjson matches keys case-sensitively, so the tags
+// here must match exactly — case-insensitive fallback (which encoding/
+// json provides) does not apply.
 type ConnectionStatus struct {
-	Duration    NanoDuration    `json:"duration"`
-	SendMonitor FlowStatus      `json:"send_monitor"`
-	RecvMonitor FlowStatus      `json:"recv_monitor"`
-	Channels    []ChannelStatus `json:"channels"`
+	Duration    NanoDuration    `json:"Duration"`
+	SendMonitor FlowStatus      `json:"SendMonitor"`
+	RecvMonitor FlowStatus      `json:"RecvMonitor"`
+	Channels    []ChannelStatus `json:"Channels"`
 }
 
 type ChannelStatus struct {
-	ID                byte   `json:"id"`
-	SendQueueCapacity string `json:"send_queue_capacity"`
-	SendQueueSize     string `json:"send_queue_size"`
-	Priority          string `json:"priority"`
-	RecentlySent      string `json:"recently_sent"`
+	ID                byte   `json:"ID"`
+	SendQueueCapacity string `json:"SendQueueCapacity"`
+	SendQueueSize     string `json:"SendQueueSize"`
+	Priority          string `json:"Priority"`
+	RecentlySent      string `json:"RecentlySent"`
 }
 
 type FlowStatus struct {
-	Start    CustomTime   `json:"start"`     // Transfer start time
-	Bytes    ByteSize     `json:"bytes"`     // Total number of bytes transferred
-	Samples  ByteSize     `json:"samples"`   // Total number of samples taken
-	InstRate ByteSize     `json:"inst_rate"` // Instantaneous transfer rate
-	CurRate  ByteSize     `json:"cur_rate"`  // Current transfer rate (EMA of InstRate)
-	AvgRate  ByteSize     `json:"avg_rate"`  // Average transfer rate (Bytes / Duration)
-	PeakRate ByteSize     `json:"peak_rate"` // Maximum instantaneous transfer rate
-	BytesRem ByteSize     `json:"bytes_rem"` // Number of bytes remaining in the transfer
-	Duration NanoDuration `json:"duration"`  // Time period covered by the statistics
-	Idle     NanoDuration `json:"idle"`      // Time since the last transfer of at least 1 byte
-	TimeRem  NanoDuration `json:"time_rem"`  // Estimated time to completion
-	Progress Percent      `json:"progress"`  // Overall transfer progress
-	Active   bool         `json:"active"`    // Flag indicating an active transfer
+	Start    CustomTime   `json:"Start"`    // Transfer start time
+	Bytes    ByteSize     `json:"Bytes"`    // Total number of bytes transferred
+	Samples  ByteSize     `json:"Samples"`  // Total number of samples taken
+	InstRate ByteSize     `json:"InstRate"` // Instantaneous transfer rate
+	CurRate  ByteSize     `json:"CurRate"`  // Current transfer rate (EMA of InstRate)
+	AvgRate  ByteSize     `json:"AvgRate"`  // Average transfer rate (Bytes / Duration)
+	PeakRate ByteSize     `json:"PeakRate"` // Maximum instantaneous transfer rate
+	BytesRem ByteSize     `json:"BytesRem"` // Number of bytes remaining in the transfer
+	Duration NanoDuration `json:"Duration"` // Time period covered by the statistics
+	Idle     NanoDuration `json:"Idle"`     // Time since the last transfer of at least 1 byte
+	TimeRem  NanoDuration `json:"TimeRem"`  // Estimated time to completion
+	Progress Percent      `json:"Progress"` // Overall transfer progress
+	Active   bool         `json:"Active"`   // Flag indicating an active transfer
 }
 
 type NanoDuration time.Duration
 
 func (nd *NanoDuration) UnmarshalJSON(b []byte) error {
-	// Remove quotes from the string
-	// s := string(b)
-	// s = s[1 : len(s)-1]
-
-	// Parse the string as an int64
-	nanos, err := strconv.ParseInt(string(b), 10, 64)
+	// CometBFT serializes int64 nanoseconds as a JSON string, so the
+	// raw bytes look like "699569204788255" (quotes included). Accept
+	// either the quoted or unquoted form.
+	s := string(b)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	nanos, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %v", err)
 	}
-
-	// Convert nanoseconds to time.Duration
 	*nd = NanoDuration(time.Duration(nanos))
 	return nil
 }
