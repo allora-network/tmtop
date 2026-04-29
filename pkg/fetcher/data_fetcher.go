@@ -112,20 +112,34 @@ func (f *DataFetcher) GetValidators() ([]types.TMValidator, error) {
 
 	cosmValMap := make(map[string]types.CosmosValidator, len(cosmosVals))
 	for _, cosmosVal := range cosmosVals {
+		// Skip Cosmos validators we can't index by consensus address —
+		// e.g. partial fallback responses that omit ConsensusPubkey.
+		// Without this guard the .Address() call panics.
+		if cosmosVal.ConsensusPubkey == nil {
+			continue
+		}
 		cosmValMap[cosmosVal.ConsensusPubkey.Address().String()] = cosmosVal
 	}
 
 	var vals []types.TMValidator
 	for i, cometVal := range cometVals {
-		// Find matching Cosmos validator by consensus address
-		cosmosVal := cosmValMap[cometVal.PubKey.Address().String()]
+		// Only attach a CosmosValidator pointer when we actually matched
+		// one. Previously this took &cosmosVal of the zero-value returned
+		// from a missed map lookup, which surfaces downstream as a non-nil
+		// pointer with a nil ConsensusPubkey — and panics in the crawler
+		// (and anywhere else doing CosmosValidator.ConsensusPubkey.Address()).
+		var cosmosValPtr *types.CosmosValidator
+		if cosmosVal, ok := cosmValMap[cometVal.PubKey.Address().String()]; ok {
+			cosmosValCopy := cosmosVal
+			cosmosValPtr = &cosmosValCopy
+		}
 		votingPowerPercent := big.NewFloat(0)
 		if totalVotingPower > 0 {
 			votingPowerPercent = big.NewFloat(float64(cometVal.VotingPower) / float64(totalVotingPower) * 100)
 		}
 		vals = append(vals, types.TMValidator{
 			CometValidator:     cometVal,
-			CosmosValidator:    &cosmosVal,
+			CosmosValidator:    cosmosValPtr,
 			Index:              i,
 			VotingPowerPercent: votingPowerPercent,
 		})
