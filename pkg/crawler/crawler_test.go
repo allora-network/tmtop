@@ -94,8 +94,14 @@ func TestCrawlerExitsOnStop(t *testing.T) {
 func TestCrawlerFetchError(t *testing.T) {
 	const seed = "http://seed:26657"
 
+	// Signal from inside the mock so we can synchronize on the fetch
+	// attempt rather than guessing with time.Sleep.
+	fetched := make(chan struct{})
 	mockFetcher := mocks.NewMockFetcher(t)
-	mockFetcher.EXPECT().GetNetInfo(seed).Return(nil, errors.New("connection refused")).Once()
+	mockFetcher.EXPECT().GetNetInfo(seed).
+		Run(func(string) { close(fetched) }).
+		Return(nil, errors.New("connection refused")).
+		Once()
 	// GetCometNodeStatus is NOT expected — fetchOne returns early after
 	// the GetNetInfo failure.
 
@@ -110,8 +116,11 @@ func TestCrawlerFetchError(t *testing.T) {
 		close(done)
 	}()
 
-	// Give it a moment to attempt the fetch.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-fetched:
+	case <-time.After(time.Second):
+		t.Fatal("crawler never attempted the seed fetch")
+	}
 
 	close(chStop)
 
@@ -131,16 +140,26 @@ func TestCrawlerFetchError(t *testing.T) {
 // URL from being re-fetched within rescanInterval.
 //
 // We seed the crawler, wait for the seed fetch to complete, then send
-// the same URL into the mailbox. The second delivery should be
-// dropped by the dedup logic since it's <15s since last fetch.
+// (a) the same URL — which should be deduped — and (b) a probe URL
+// right after. Once the probe completes we know the deduped URL has
+// already been pulled out of the mailbox and skipped. mockery's strict
+// .Once() on the seed asserts the dedup actually happened.
 func TestCrawlerRescanDeduplication(t *testing.T) {
 	const seed = "http://seed:26657"
+	const probe = "http://probe:26657"
 
 	mockFetcher := mocks.NewMockFetcher(t)
-	// Exactly one call expected for the seed. mockery will fail the
-	// test if either is called twice within the test run.
+	// Exactly one call expected for the seed — mockery fails the test
+	// if it's called twice. Probe is the synchronization handle for
+	// "the post-dup batch has finished processing."
+	probeFetched := make(chan struct{})
 	mockFetcher.EXPECT().GetNetInfo(seed).Return(&types.NetInfo{}, nil).Once()
 	mockFetcher.EXPECT().GetCometNodeStatus(seed).Return(fakeStatus("a", "n"), nil).Once()
+	mockFetcher.EXPECT().GetNetInfo(probe).Return(&types.NetInfo{}, nil).Once()
+	mockFetcher.EXPECT().GetCometNodeStatus(probe).
+		Run(func(string) { close(probeFetched) }).
+		Return(fakeStatus("b", "p"), nil).
+		Once()
 
 	state := types.NewState(seed, zerolog.Nop())
 	chStop := make(chan struct{})
@@ -159,9 +178,17 @@ func TestCrawlerRescanDeduplication(t *testing.T) {
 		return ok
 	}, time.Second, 10*time.Millisecond)
 
-	// Re-deliver the seed URL. Should be deduped.
+	// Re-deliver the seed URL — should be deduped — and immediately
+	// queue the probe behind it. The mailbox is FIFO; once the probe
+	// fetch fires the duplicate has already been seen and skipped.
 	c.mb.Deliver(seed)
-	time.Sleep(100 * time.Millisecond)
+	c.mb.Deliver(probe)
+
+	select {
+	case <-probeFetched:
+	case <-time.After(time.Second):
+		t.Fatal("probe URL never fetched — crawler may be wedged")
+	}
 
 	close(chStop)
 	wg.Wait()
