@@ -362,7 +362,7 @@ func (va *ValidatorAnalytics) GetAllValidatorMetrics(ctx context.Context, window
 			TotalBlocks:       ranking.TotalBlocks,
 			BlocksSigned:      ranking.BlocksSigned,
 			BlocksMissed:      ranking.BlocksMissed,
-			SigningEfficiency: ranking.SigningEfficiency,
+			SigningEfficiency: convertToFloat64(ranking.SigningEfficiency),
 			PrevotesCast:      ranking.PrevotesCast,
 			PrecommitsCast:    ranking.PrecommitsCast,
 			VotingPower:       votingPower,
