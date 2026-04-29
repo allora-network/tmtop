@@ -55,16 +55,22 @@ func New(config Config) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	// From here on any error path needs to close the *sql.DB; Open
+	// allocates a connection pool that won't be reclaimed by GC alone.
+	closeOnErr := func(wrapped error) error {
+		_ = db.Close()
+		return wrapped
+	}
 
 	// Configure SQLite for better performance
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
+		return nil, closeOnErr(fmt.Errorf("failed to set WAL mode: %w", err))
 	}
 	if _, err := db.Exec("PRAGMA synchronous=NORMAL"); err != nil {
-		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
+		return nil, closeOnErr(fmt.Errorf("failed to set synchronous mode: %w", err))
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+		return nil, closeOnErr(fmt.Errorf("failed to enable foreign keys: %w", err))
 	}
 
 	service := &DB{
@@ -74,7 +80,7 @@ func New(config Config) (*DB, error) {
 
 	// Run migrations
 	if err := service.migrate(); err != nil {
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
+		return nil, closeOnErr(fmt.Errorf("failed to run migrations: %w", err))
 	}
 
 	return service, nil
