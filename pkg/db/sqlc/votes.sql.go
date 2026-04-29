@@ -266,10 +266,10 @@ func (q *Queries) GetVotesForValidator(ctx context.Context, arg GetVotesForValid
 }
 
 const getVotingPowerForRound = `-- name: GetVotingPowerForRound :one
-SELECT 
+SELECT
     SUM(CASE WHEN v.vote_type = 1 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as prevote_power,
     SUM(CASE WHEN v.vote_type = 2 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as precommit_power,
-    SUM(vs.voting_power) as total_power
+    (SELECT COALESCE(SUM(vs2.voting_power), 0) FROM validator_snapshots vs2 WHERE vs2.height = ?) as total_power
 FROM votes v
 JOIN validator_snapshots vs ON v.validator_hex_address = vs.validator_hex_address AND v.height = vs.height
 WHERE v.height = ? AND v.round_number = ?
@@ -277,17 +277,22 @@ WHERE v.height = ? AND v.round_number = ?
 
 type GetVotingPowerForRoundParams struct {
 	Height      int64 `json:"height"`
+	Height_2    int64 `json:"height_2"`
 	RoundNumber int64 `json:"round_number"`
 }
 
 type GetVotingPowerForRoundRow struct {
 	PrevotePower   sql.NullFloat64 `json:"prevote_power"`
 	PrecommitPower sql.NullFloat64 `json:"precommit_power"`
-	TotalPower     sql.NullFloat64 `json:"total_power"`
+	TotalPower     interface{}     `json:"total_power"`
 }
 
+// total_power deliberately uses a separate subquery rather than SUM(vs.voting_power)
+// over the join: a validator with both a prevote and precommit row would appear
+// twice in the join result, which would double-count its voting power in any
+// aggregate that doesn't filter by vote_type.
 func (q *Queries) GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error) {
-	row := q.queryRow(ctx, q.getVotingPowerForRoundStmt, getVotingPowerForRound, arg.Height, arg.RoundNumber)
+	row := q.queryRow(ctx, q.getVotingPowerForRoundStmt, getVotingPowerForRound, arg.Height, arg.Height_2, arg.RoundNumber)
 	var i GetVotingPowerForRoundRow
 	err := row.Scan(&i.PrevotePower, &i.PrecommitPower, &i.TotalPower)
 	return i, err

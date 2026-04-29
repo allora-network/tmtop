@@ -75,6 +75,10 @@ type Querier interface {
 	GetVotesForHeight(ctx context.Context, height int64) ([]Vote, error)
 	GetVotesForRound(ctx context.Context, arg GetVotesForRoundParams) ([]Vote, error)
 	GetVotesForValidator(ctx context.Context, arg GetVotesForValidatorParams) ([]Vote, error)
+	// total_power deliberately uses a separate subquery rather than SUM(vs.voting_power)
+	// over the join: a validator with both a prevote and precommit row would appear
+	// twice in the join result, which would double-count its voting power in any
+	// aggregate that doesn't filter by vote_type.
 	GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error)
 	ListAllValidators(ctx context.Context) ([]ListAllValidatorsRow, error)
 	SampleHeights(ctx context.Context) ([]SampleHeightsRow, error)
