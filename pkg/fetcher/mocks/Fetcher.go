@@ -499,14 +499,23 @@ func (_c *MockFetcher_GetValidators_Call) RunAndReturn(run func() ([]types0.TMVa
 }
 
 // Subscribe provides a mock function for the type MockFetcher
+//
+// NOTE: hand-patched after mockery codegen. The mockery v3.7 testify
+// template generates `_mock.Called(mb, events)` here, passing the
+// variadic slice as a single argument. The matching EXPECT().Subscribe
+// helper below already spreads its variadic arguments via
+// `append([]interface{}{mb}, events...)...`, so the two would never
+// agree on argument count and any expectation set with concrete event
+// names would silently fail to match. Spread events into individual
+// interface{} values so the registered call shape matches the
+// expectation. If/when mockery is regenerated this needs to be
+// re-applied.
 func (_mock *MockFetcher) Subscribe(mb *utils.Mailbox[types1.TMEventData], events ...string) {
-	if len(events) > 0 {
-		_mock.Called(mb, events)
-	} else {
-		_mock.Called(mb)
+	_ca := []interface{}{mb}
+	for _, e := range events {
+		_ca = append(_ca, e)
 	}
-
-	return
+	_mock.Called(_ca...)
 }
 
 // MockFetcher_Subscribe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Subscribe'
