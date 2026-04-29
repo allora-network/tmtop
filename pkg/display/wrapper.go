@@ -254,6 +254,10 @@ func (w *Wrapper) Start() error {
 			if columns < 1 {
 				columns = 1
 			}
+			// Keep w.ColumnsCount in sync so the m/l keybindings
+			// increment/decrement from the auto-computed value rather
+			// than the stale DefaultColumnsCount.
+			w.ColumnsCount = columns
 			w.LastRoundTableData.SetColumnsCount(columns)
 		}
 		w.App.SetAfterDrawFunc(nil)
@@ -386,6 +390,9 @@ func (w *Wrapper) ChangeMode() {
 			if columns < 1 {
 				columns = 1
 			}
+			// Same as the startup hook: keep w.ColumnsCount in sync so
+			// m/l adjust from here, not from a stale value.
+			w.ColumnsCount = columns
 			w.LastRoundTableData.SetColumnsCount(columns)
 		}
 	}
