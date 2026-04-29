@@ -86,7 +86,7 @@ func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg Get
 }
 
 const getProposerPerformance = `-- name: GetProposerPerformance :one
-s;
+bs;
 
 SELECT 
     COUNT(*) as blocks_proposed,
@@ -94,7 +94,7 @@ SELECT
     ROUND(100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) / COUNT(*), 2) as proposal_success_rate
 FROM rounds r
 JOIN heights h ON r.height = h.height
-WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time <=
+WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time
 `
 
 type GetProposerPerformanceParams struct {
@@ -323,18 +323,22 @@ const getValidatorRanking = `-- name: GetValidatorRanking :many
 t;
 
 WITH validator_metrics AS (
-    SELECT 
+    SELECT
         vals.hex_address,
         vals.moniker,
-        -- Block signing metrics
-        COUNT(h.height) as total_blocks,
-        COUNT(v.id) as blocks_signed,
-        ROUND(100.0 * COUNT(v.id) / COUNT(h.height), 2) as signing_efficiency,
-        
-        -- Consensus participation
+        -- Block signing metrics: distinct heights, not vote rows
+        COUNT(DISTINCT h.height) as total_blocks,
+        COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END) as blocks_signed,
+        COALESCE(ROUND(
+            100.0 * COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END)
+                  / NULLIF(COUNT(DISTINCT h.height), 0),
+            2), 0.0) as signing_efficiency,
+
+        -- Consensus participation: per-vote-row counts are correct here
+        -- because (height, round, validator, vote_type) is UNIQUE.
         COUNT(CASE WHEN v.vote_type = 1 THEN 1 END) as prevotes_cast,
         COUNT(CASE WHEN v.vote_type = 2 THEN 1 END) as precommits_cast,
-        
+
         -- Latest voting power
         COALESCE(MAX(vs.voting_power), 0) as voting_power
     FROM validators vals
@@ -344,7 +348,7 @@ WITH validator_metrics AS (
     WHERE h.block_time >= ? AND h.block_time <= ?
     GROUP BY vals.hex_address, vals.moniker
 )
-SELECT 
+SELECT
     hex_address,
     moniker,
     total_blocks,
@@ -356,7 +360,7 @@ SELECT
     voting_power,
     RANK() OVER (ORDER BY signing_efficiency DESC, voting_power DESC) as efficiency_rank
 FROM validator_metrics
-ORDER BY efficiency_ra
+ORDER BY efficiency_
 `
 
 type GetValidatorRankingParams struct {
@@ -370,14 +374,18 @@ type GetValidatorRankingRow struct {
 	TotalBlocks       int64          `json:"total_blocks"`
 	BlocksSigned      int64          `json:"blocks_signed"`
 	BlocksMissed      int64          `json:"blocks_missed"`
-	SigningEfficiency float64        `json:"signing_efficiency"`
+	SigningEfficiency interface{}    `json:"signing_efficiency"`
 	PrevotesCast      int64          `json:"prevotes_cast"`
 	PrecommitsCast    int64          `json:"precommits_cast"`
 	VotingPower       interface{}    `json:"voting_power"`
 	EfficiencyRank    interface{}    `json:"efficiency_rank"`
 }
 
-// Get validator performance ranking with multiple metrics
+// Get validator performance ranking with multiple metrics.
+// total_blocks and blocks_signed are computed against distinct heights, not
+// vote rows — otherwise a validator with both prevote and precommit per
+// height would have its block counts doubled (and ratios were preserved by
+// coincidence, but raw counts were wrong).
 func (q *Queries) GetValidatorRanking(ctx context.Context, arg GetValidatorRankingParams) ([]GetValidatorRankingRow, error) {
 	rows, err := q.query(ctx, q.getValidatorRankingStmt, getValidatorRanking, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
@@ -459,7 +467,7 @@ func (q *Queries) GetValidatorSigningEfficiency(ctx context.Context, arg GetVali
 }
 
 const getValidatorUptime = `-- name: GetValidatorUptime :one
-k;
+ank;
 
 WITH block_stats AS (
     SELECT 
@@ -478,7 +486,7 @@ SELECT
     COALESCE(ROUND(100.0 * bs.blocks_participated / NULLIF(bs.total_blocks_in_window, 0), 2), 0.0) as uptime_percentage,
     bs.window_start,
     bs.window_end
-FROM block_stats
+FROM block_stat
 `
 
 type GetValidatorUptimeParams struct {

@@ -63,7 +63,11 @@ type Querier interface {
 	GetValidatorMissedBlockStreaks(ctx context.Context, arg GetValidatorMissedBlockStreaksParams) ([]GetValidatorMissedBlockStreaksRow, error)
 	// Get signing efficiency over time buckets (hourly)
 	GetValidatorPerformanceTimeSeries(ctx context.Context, arg GetValidatorPerformanceTimeSeriesParams) ([]GetValidatorPerformanceTimeSeriesRow, error)
-	// Get validator performance ranking with multiple metrics
+	// Get validator performance ranking with multiple metrics.
+	// total_blocks and blocks_signed are computed against distinct heights, not
+	// vote rows — otherwise a validator with both prevote and precommit per
+	// height would have its block counts doubled (and ratios were preserved by
+	// coincidence, but raw counts were wrong).
 	GetValidatorRanking(ctx context.Context, arg GetValidatorRankingParams) ([]GetValidatorRankingRow, error)
 	// Calculate signing efficiency for a validator over a time window
 	GetValidatorSigningEfficiency(ctx context.Context, arg GetValidatorSigningEfficiencyParams) (GetValidatorSigningEfficiencyRow, error)

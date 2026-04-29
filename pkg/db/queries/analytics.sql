@@ -125,20 +125,28 @@ FROM time_buckets
 ORDER BY time_bucket;
 
 -- name: GetValidatorRanking :many
--- Get validator performance ranking with multiple metrics
+-- Get validator performance ranking with multiple metrics.
+-- total_blocks and blocks_signed are computed against distinct heights, not
+-- vote rows — otherwise a validator with both prevote and precommit per
+-- height would have its block counts doubled (and ratios were preserved by
+-- coincidence, but raw counts were wrong).
 WITH validator_metrics AS (
-    SELECT 
+    SELECT
         vals.hex_address,
         vals.moniker,
-        -- Block signing metrics
-        COUNT(h.height) as total_blocks,
-        COUNT(v.id) as blocks_signed,
-        ROUND(100.0 * COUNT(v.id) / COUNT(h.height), 2) as signing_efficiency,
-        
-        -- Consensus participation
+        -- Block signing metrics: distinct heights, not vote rows
+        COUNT(DISTINCT h.height) as total_blocks,
+        COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END) as blocks_signed,
+        COALESCE(ROUND(
+            100.0 * COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END)
+                  / NULLIF(COUNT(DISTINCT h.height), 0),
+            2), 0.0) as signing_efficiency,
+
+        -- Consensus participation: per-vote-row counts are correct here
+        -- because (height, round, validator, vote_type) is UNIQUE.
         COUNT(CASE WHEN v.vote_type = 1 THEN 1 END) as prevotes_cast,
         COUNT(CASE WHEN v.vote_type = 2 THEN 1 END) as precommits_cast,
-        
+
         -- Latest voting power
         COALESCE(MAX(vs.voting_power), 0) as voting_power
     FROM validators vals
@@ -148,7 +156,7 @@ WITH validator_metrics AS (
     WHERE h.block_time >= ? AND h.block_time <= ?
     GROUP BY vals.hex_address, vals.moniker
 )
-SELECT 
+SELECT
     hex_address,
     moniker,
     total_blocks,
