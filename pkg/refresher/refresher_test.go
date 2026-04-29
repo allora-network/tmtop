@@ -58,13 +58,13 @@ func TestRunTicks(t *testing.T) {
 		close(done)
 	}()
 
-	// 250ms should give us the initial call plus 4-5 ticks. Allow
-	// jitter and just assert "more than one call".
-	time.Sleep(250 * time.Millisecond)
+	// Wait until at least one tick has fired beyond the initial call.
+	// time.Sleep with a fixed duration is timing-flaky on busy CI.
+	require.Eventually(t, func() bool { return calls.Load() > 1 },
+		time.Second, 10*time.Millisecond,
+		"refresh should fire on ticks")
 	close(chStop)
 	<-done
-
-	require.Greater(t, calls.Load(), int64(1), "refresh should fire on ticks, got %d calls", calls.Load())
 }
 
 // TestRunExitsOnStop verifies Run returns promptly when chStop closes
