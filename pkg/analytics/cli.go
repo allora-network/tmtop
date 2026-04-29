@@ -146,7 +146,11 @@ func (cli *CLIAnalytics) PrintValidatorRankings(ctx context.Context, durationStr
 			moniker = moniker[:17] + "..."
 		}
 		if moniker == "" {
-			moniker = v.HexAddress[:12] + "..."
+			if len(v.HexAddress) > 12 {
+				moniker = v.HexAddress[:12] + "..."
+			} else {
+				moniker = v.HexAddress
+			}
 		}
 
 		fmt.Printf("%-4d %-20s %-12s %-12s %-12d %-8d %-12d\n",
