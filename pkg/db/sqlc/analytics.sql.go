@@ -88,40 +88,47 @@ func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg Get
 const getProposerPerformance = `-- name: GetProposerPerformance :one
 s bs;
 
-SELECT 
-    COUNT(*) as blocks_proposed,
-    COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as successful_proposals,
-    ROUND(100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) / COUNT(*), 2) as proposal_success_rate
+SELECT
+    COUNT(*) as total_proposing_opportunities,
+    COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as blocks_proposed_by_validator,
+    COALESCE(ROUND(
+        100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END)
+              / NULLIF(COUNT(*), 0),
+        2), 0.0) as proposal_share_rate
 FROM rounds r
 JOIN heights h ON r.height = h.height
-WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time
+WHERE h.block_time >= ? AND h.block_time
 `
 
 type GetProposerPerformanceParams struct {
 	ProposerAddress   sql.NullString `json:"proposer_address"`
 	ProposerAddress_2 sql.NullString `json:"proposer_address_2"`
-	ProposerAddress_3 sql.NullString `json:"proposer_address_3"`
 	BlockTime         sql.NullTime   `json:"block_time"`
 	BlockTime_2       sql.NullTime   `json:"block_time_2"`
 }
 
 type GetProposerPerformanceRow struct {
-	BlocksProposed      int64   `json:"blocks_proposed"`
-	SuccessfulProposals int64   `json:"successful_proposals"`
-	ProposalSuccessRate float64 `json:"proposal_success_rate"`
+	TotalProposingOpportunities int64       `json:"total_proposing_opportunities"`
+	BlocksProposedByValidator   int64       `json:"blocks_proposed_by_validator"`
+	ProposalShareRate           interface{} `json:"proposal_share_rate"`
 }
 
-// Calculate proposer performance metrics (when validator is selected as proposer)
+// Calculate proposer share over a time window: how often this validator
+// was selected as proposer relative to all proposals in the window.
+//
+// Previously the WHERE clause filtered to r.proposer_address = ?, which
+// made successful_proposals identical to blocks_proposed and the success
+// rate always 100 %. The intended metric is "share of all proposing
+// opportunities," so the WHERE no longer filters by proposer.
 func (q *Queries) GetProposerPerformance(ctx context.Context, arg GetProposerPerformanceParams) (GetProposerPerformanceRow, error) {
 	row := q.queryRow(ctx, q.getProposerPerformanceStmt, getProposerPerformance,
 		arg.ProposerAddress,
 		arg.ProposerAddress_2,
-		arg.ProposerAddress_3,
 		arg.BlockTime,
 		arg.BlockTime_2,
 	)
 	var i GetProposerPerformanceRow
-	err := row.Scan(&i.BlocksProposed, &i.SuccessfulProposals, &i.ProposalSuccessRate)
+	err := row.Scan(&i.TotalProposingOpportunities, &i.BlocksProposedByValidator, &i.ProposalShareRate)
 	return i, err
 }
 

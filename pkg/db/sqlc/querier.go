@@ -49,7 +49,13 @@ type Querier interface {
 	// Returns the smallest height that was inserted at or after the given time.
 	// Used by retention cleanup to translate a time-based cutoff into a height-based one.
 	GetMinHeightAfterTime(ctx context.Context, createdAt sql.NullTime) (interface{}, error)
-	// Calculate proposer performance metrics (when validator is selected as proposer)
+	// Calculate proposer share over a time window: how often this validator
+	// was selected as proposer relative to all proposals in the window.
+	//
+	// Previously the WHERE clause filtered to r.proposer_address = ?, which
+	// made successful_proposals identical to blocks_proposed and the success
+	// rate always 100 %. The intended metric is "share of all proposing
+	// opportunities," so the WHERE no longer filters by proposer.
 	GetProposerPerformance(ctx context.Context, arg GetProposerPerformanceParams) (GetProposerPerformanceRow, error)
 	GetRecentConsensusEvents(ctx context.Context, limit int64) ([]ConsensusEvent, error)
 	GetRecentRounds(ctx context.Context, limit int64) ([]Round, error)

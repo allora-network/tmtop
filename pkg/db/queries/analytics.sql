@@ -197,11 +197,20 @@ SELECT
 FROM block_stats bs;
 
 -- name: GetProposerPerformance :one
--- Calculate proposer performance metrics (when validator is selected as proposer)
-SELECT 
-    COUNT(*) as blocks_proposed,
-    COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as successful_proposals,
-    ROUND(100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) / COUNT(*), 2) as proposal_success_rate
+-- Calculate proposer share over a time window: how often this validator
+-- was selected as proposer relative to all proposals in the window.
+--
+-- Previously the WHERE clause filtered to r.proposer_address = ?, which
+-- made successful_proposals identical to blocks_proposed and the success
+-- rate always 100 %. The intended metric is "share of all proposing
+-- opportunities," so the WHERE no longer filters by proposer.
+SELECT
+    COUNT(*) as total_proposing_opportunities,
+    COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as blocks_proposed_by_validator,
+    COALESCE(ROUND(
+        100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END)
+              / NULLIF(COUNT(*), 0),
+        2), 0.0) as proposal_share_rate
 FROM rounds r
 JOIN heights h ON r.height = h.height
-WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time <= ?;
+WHERE h.block_time >= ? AND h.block_time <= ?;
