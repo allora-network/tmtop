@@ -74,7 +74,12 @@ type Querier interface {
 	GetValidatorSnapshot(ctx context.Context, arg GetValidatorSnapshotParams) (ValidatorSnapshot, error)
 	GetValidatorSnapshotsForHeight(ctx context.Context, height int64) ([]ValidatorSnapshot, error)
 	GetValidatorSnapshotsForValidator(ctx context.Context, arg GetValidatorSnapshotsForValidatorParams) ([]ValidatorSnapshot, error)
-	// Calculate validator uptime metrics over time window
+	// Calculate validator uptime metrics over time window.
+	// COUNT(*) and COUNT(v.id) operate on the heights×votes join, so a
+	// height with both prevote and precommit rows would inflate both
+	// counters. Use COUNT(DISTINCT h.height) and COUNT(DISTINCT CASE WHEN
+	// v.id IS NOT NULL THEN h.height END) so each height contributes at
+	// most once.
 	GetValidatorUptime(ctx context.Context, arg GetValidatorUptimeParams) (GetValidatorUptimeRow, error)
 	GetValidators(ctx context.Context) ([]Validator, error)
 	GetValidatorsByHeight(ctx context.Context, height int64) ([]GetValidatorsByHeightRow, error)

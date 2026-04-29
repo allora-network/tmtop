@@ -86,7 +86,7 @@ func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg Get
 }
 
 const getProposerPerformance = `-- name: GetProposerPerformance :one
-bs;
+s bs;
 
 SELECT 
     COUNT(*) as blocks_proposed,
@@ -470,9 +470,9 @@ const getValidatorUptime = `-- name: GetValidatorUptime :one
 ank;
 
 WITH block_stats AS (
-    SELECT 
-        COUNT(*) as total_blocks_in_window,
-        COUNT(v.id) as blocks_participated,
+    SELECT
+        COUNT(DISTINCT h.height) as total_blocks_in_window,
+        COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END) as blocks_participated,
         MIN(h.block_time) as window_start,
         MAX(h.block_time) as window_end
     FROM heights h
@@ -486,7 +486,7 @@ SELECT
     COALESCE(ROUND(100.0 * bs.blocks_participated / NULLIF(bs.total_blocks_in_window, 0), 2), 0.0) as uptime_percentage,
     bs.window_start,
     bs.window_end
-FROM block_stat
+FROM block_sta
 `
 
 type GetValidatorUptimeParams struct {
@@ -504,7 +504,12 @@ type GetValidatorUptimeRow struct {
 	WindowEnd           interface{} `json:"window_end"`
 }
 
-// Calculate validator uptime metrics over time window
+// Calculate validator uptime metrics over time window.
+// COUNT(*) and COUNT(v.id) operate on the heights×votes join, so a
+// height with both prevote and precommit rows would inflate both
+// counters. Use COUNT(DISTINCT h.height) and COUNT(DISTINCT CASE WHEN
+// v.id IS NOT NULL THEN h.height END) so each height contributes at
+// most once.
 func (q *Queries) GetValidatorUptime(ctx context.Context, arg GetValidatorUptimeParams) (GetValidatorUptimeRow, error) {
 	row := q.queryRow(ctx, q.getValidatorUptimeStmt, getValidatorUptime, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	var i GetValidatorUptimeRow

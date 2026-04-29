@@ -171,11 +171,16 @@ FROM validator_metrics
 ORDER BY efficiency_rank;
 
 -- name: GetValidatorUptime :one
--- Calculate validator uptime metrics over time window
+-- Calculate validator uptime metrics over time window.
+-- COUNT(*) and COUNT(v.id) operate on the heights×votes join, so a
+-- height with both prevote and precommit rows would inflate both
+-- counters. Use COUNT(DISTINCT h.height) and COUNT(DISTINCT CASE WHEN
+-- v.id IS NOT NULL THEN h.height END) so each height contributes at
+-- most once.
 WITH block_stats AS (
-    SELECT 
-        COUNT(*) as total_blocks_in_window,
-        COUNT(v.id) as blocks_participated,
+    SELECT
+        COUNT(DISTINCT h.height) as total_blocks_in_window,
+        COUNT(DISTINCT CASE WHEN v.id IS NOT NULL THEN h.height END) as blocks_participated,
         MIN(h.block_time) as window_start,
         MAX(h.block_time) as window_end
     FROM heights h
