@@ -113,7 +113,9 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 			return fmt.Errorf("reading config file %s: %w", v.ConfigFileUsed(), err)
 		}
 	}
-	fmt.Println("Loaded config file:", v.ConfigFileUsed())
+	if used := v.ConfigFileUsed(); used != "" {
+		fmt.Println("Loaded config file:", used)
+	}
 
 	// Map viper values to config struct (only if they exist and are not zero values)
 	if v.IsSet("rpc-host") {
