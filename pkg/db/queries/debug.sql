@@ -1,4 +1,4 @@
--- COUNT helpers — one per table because sqlc can't parameterize
+-- COUNT helpers - one per table because sqlc can't parameterize
 -- table identifiers.
 
 -- name: CountValidators :one

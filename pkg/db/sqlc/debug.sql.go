@@ -11,9 +11,7 @@ import (
 )
 
 const countConsensusEvents = `-- name: CountConsensusEvents :one
-s;
-
-SELECT COUNT(*) FROM consensus_even
+SELECT COUNT(*) FROM consensus_events
 `
 
 func (q *Queries) CountConsensusEvents(ctx context.Context) (int64, error) {
@@ -24,9 +22,7 @@ func (q *Queries) CountConsensusEvents(ctx context.Context) (int64, error) {
 }
 
 const countHeights = `-- name: CountHeights :one
-s;
-
-SELECT COUNT(*) FROM heigh
+SELECT COUNT(*) FROM heights
 `
 
 func (q *Queries) CountHeights(ctx context.Context) (int64, error) {
@@ -37,9 +33,7 @@ func (q *Queries) CountHeights(ctx context.Context) (int64, error) {
 }
 
 const countHeightsInTimeWindow = `-- name: CountHeightsInTimeWindow :one
-s;
-
-SELECT COUNT(*) FROM heights WHERE block_time >= ? AND block_time <=
+SELECT COUNT(*) FROM heights WHERE block_time >= ? AND block_time <= ?
 `
 
 type CountHeightsInTimeWindowParams struct {
@@ -55,9 +49,7 @@ func (q *Queries) CountHeightsInTimeWindow(ctx context.Context, arg CountHeights
 }
 
 const countRounds = `-- name: CountRounds :one
-s;
-
-SELECT COUNT(*) FROM roun
+SELECT COUNT(*) FROM rounds
 `
 
 func (q *Queries) CountRounds(ctx context.Context) (int64, error) {
@@ -68,9 +60,7 @@ func (q *Queries) CountRounds(ctx context.Context) (int64, error) {
 }
 
 const countValidatorSnapshots = `-- name: CountValidatorSnapshots :one
-s;
-
-SELECT COUNT(*) FROM validator_snapsho
+SELECT COUNT(*) FROM validator_snapshots
 `
 
 func (q *Queries) CountValidatorSnapshots(ctx context.Context) (int64, error) {
@@ -82,10 +72,10 @@ func (q *Queries) CountValidatorSnapshots(ctx context.Context) (int64, error) {
 
 const countValidators = `-- name: CountValidators :one
 
-SELECT COUNT(*) FROM validato
+SELECT COUNT(*) FROM validators
 `
 
-// COUNT helpers — one per table because sqlc can't parameterize
+// COUNT helpers - one per table because sqlc can't parameterize
 // table identifiers.
 func (q *Queries) CountValidators(ctx context.Context) (int64, error) {
 	row := q.queryRow(ctx, q.countValidatorsStmt, countValidators)
@@ -95,9 +85,7 @@ func (q *Queries) CountValidators(ctx context.Context) (int64, error) {
 }
 
 const countVotes = `-- name: CountVotes :one
-s;
-
-SELECT COUNT(*) FROM vot
+SELECT COUNT(*) FROM votes
 `
 
 func (q *Queries) CountVotes(ctx context.Context) (int64, error) {
@@ -108,13 +96,11 @@ func (q *Queries) CountVotes(ctx context.Context) (int64, error) {
 }
 
 const countVotesForValidatorInTimeWindow = `-- name: CountVotesForValidatorInTimeWindow :one
-?;
-
 SELECT COUNT(*)
 FROM votes v
 JOIN heights h ON v.height = h.height
 JOIN validators val ON v.validator_hex_address = val.hex_address
-WHERE val.operator_address = ? AND h.block_time >= ? AND h.block_time <=
+WHERE val.operator_address = ? AND h.block_time >= ? AND h.block_time <= ?
 `
 
 type CountVotesForValidatorInTimeWindowParams struct {
@@ -131,9 +117,7 @@ func (q *Queries) CountVotesForValidatorInTimeWindow(ctx context.Context, arg Co
 }
 
 const listAllValidators = `-- name: ListAllValidators :many
-?;
-
-SELECT operator_address, moniker FROM validators ORDER BY operator_addre
+SELECT operator_address, moniker FROM validators ORDER BY operator_address
 `
 
 type ListAllValidatorsRow struct {
@@ -165,9 +149,7 @@ func (q *Queries) ListAllValidators(ctx context.Context) ([]ListAllValidatorsRow
 }
 
 const sampleHeights = `-- name: SampleHeights :many
-5;
-
-SELECT height, block_time, proposer_address FROM heights ORDER BY height DESC LIMIT
+SELECT height, block_time, proposer_address FROM heights ORDER BY height DESC LIMIT 5
 `
 
 type SampleHeightsRow struct {
@@ -200,9 +182,7 @@ func (q *Queries) SampleHeights(ctx context.Context) ([]SampleHeightsRow, error)
 }
 
 const sampleValidators = `-- name: SampleValidators :many
-s;
-
-SELECT operator_address, moniker, voting_power FROM validators LIMIT
+SELECT operator_address, moniker, voting_power FROM validators LIMIT 5
 `
 
 type SampleValidatorsRow struct {
@@ -235,9 +215,7 @@ func (q *Queries) SampleValidators(ctx context.Context) ([]SampleValidatorsRow, 
 }
 
 const sampleVotes = `-- name: SampleVotes :many
-5;
-
-SELECT height, round_number, validator_hex_address, vote_type, timestamp FROM votes LIMIT
+SELECT height, round_number, validator_hex_address, vote_type, timestamp FROM votes LIMIT 5
 `
 
 type SampleVotesRow struct {
@@ -278,15 +256,13 @@ func (q *Queries) SampleVotes(ctx context.Context) ([]SampleVotesRow, error) {
 }
 
 const sampleVotesForValidator = `-- name: SampleVotesForValidator :many
-?;
-
 SELECT v.height, v.round_number, v.vote_type, v.timestamp, h.block_time
 FROM votes v
 JOIN heights h ON v.height = h.height
 JOIN validators val ON v.validator_hex_address = val.hex_address
 WHERE val.operator_address = ?
 ORDER BY v.height DESC
-LIMIT
+LIMIT ?
 `
 
 type SampleVotesForValidatorParams struct {
@@ -332,12 +308,10 @@ func (q *Queries) SampleVotesForValidator(ctx context.Context, arg SampleVotesFo
 }
 
 const searchValidatorsByOperatorOrMoniker = `-- name: SearchValidatorsByOperatorOrMoniker :many
-?;
-
 SELECT operator_address, moniker, voting_power
 FROM validators
 WHERE operator_address LIKE ? OR LOWER(moniker) LIKE LOWER(?)
-ORDER BY operator_addre
+ORDER BY operator_address
 `
 
 type SearchValidatorsByOperatorOrMonikerParams struct {
@@ -375,9 +349,7 @@ func (q *Queries) SearchValidatorsByOperatorOrMoniker(ctx context.Context, arg S
 }
 
 const validatorExistsByOperator = `-- name: ValidatorExistsByOperator :one
-5;
-
-SELECT COUNT(*) FROM validators WHERE operator_address =
+SELECT COUNT(*) FROM validators WHERE operator_address = ?
 `
 
 func (q *Queries) ValidatorExistsByOperator(ctx context.Context, operatorAddress string) (int64, error) {
