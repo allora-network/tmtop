@@ -280,6 +280,7 @@ func (f *CosmosRPCDataFetcher) getGenesisValidators() (types.CosmosValidators, e
 			Moniker:          msgCreateValidator.Description.Moniker,
 			OperatorAddress:  msgCreateValidator.ValidatorAddress, // Bech32 operator address
 			ConsensusAddress: addr.String(),
+			ConsensusPubkey:  pubkey,
 		}
 	}
 

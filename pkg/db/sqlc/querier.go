@@ -16,7 +16,7 @@ type Querier interface {
 	CountHeightsInTimeWindow(ctx context.Context, arg CountHeightsInTimeWindowParams) (int64, error)
 	CountRounds(ctx context.Context) (int64, error)
 	CountValidatorSnapshots(ctx context.Context) (int64, error)
-	// COUNT helpers — one per table because sqlc can't parameterize
+	// COUNT helpers - one per table because sqlc can't parameterize
 	// table identifiers.
 	CountValidators(ctx context.Context) (int64, error)
 	CountVotes(ctx context.Context) (int64, error)
