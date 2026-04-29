@@ -26,7 +26,7 @@ type CreateConsensusEventParams struct {
 }
 
 func (q *Queries) CreateConsensusEvent(ctx context.Context, arg CreateConsensusEventParams) (ConsensusEvent, error) {
-	row := q.queryRow(ctx, q.createConsensusEventStmt, createConsensusEvent,
+	row := q.db.QueryRowContext(ctx, createConsensusEvent,
 		arg.Height,
 		arg.RoundNumber,
 		arg.EventType,
@@ -51,7 +51,7 @@ DELETE FROM consensus_events WHERE height < ?
 `
 
 func (q *Queries) DeleteConsensusEventsOlderThan(ctx context.Context, height int64) error {
-	_, err := q.exec(ctx, q.deleteConsensusEventsOlderThanStmt, deleteConsensusEventsOlderThan, height)
+	_, err := q.db.ExecContext(ctx, deleteConsensusEventsOlderThan, height)
 	return err
 }
 
@@ -60,7 +60,7 @@ SELECT id, height, round_number, event_type, event_data, timestamp, created_at F
 `
 
 func (q *Queries) GetConsensusEvent(ctx context.Context, id int64) (ConsensusEvent, error) {
-	row := q.queryRow(ctx, q.getConsensusEventStmt, getConsensusEvent, id)
+	row := q.db.QueryRowContext(ctx, getConsensusEvent, id)
 	var i ConsensusEvent
 	err := row.Scan(
 		&i.ID,
@@ -86,7 +86,7 @@ type GetConsensusEventsByTypeParams struct {
 }
 
 func (q *Queries) GetConsensusEventsByType(ctx context.Context, arg GetConsensusEventsByTypeParams) ([]ConsensusEvent, error) {
-	rows, err := q.query(ctx, q.getConsensusEventsByTypeStmt, getConsensusEventsByType, arg.Height, arg.EventType)
+	rows, err := q.db.QueryContext(ctx, getConsensusEventsByType, arg.Height, arg.EventType)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ SELECT id, height, round_number, event_type, event_data, timestamp, created_at F
 `
 
 func (q *Queries) GetConsensusEventsForHeight(ctx context.Context, height int64) ([]ConsensusEvent, error) {
-	rows, err := q.query(ctx, q.getConsensusEventsForHeightStmt, getConsensusEventsForHeight, height)
+	rows, err := q.db.QueryContext(ctx, getConsensusEventsForHeight, height)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ type GetConsensusEventsForRoundParams struct {
 }
 
 func (q *Queries) GetConsensusEventsForRound(ctx context.Context, arg GetConsensusEventsForRoundParams) ([]ConsensusEvent, error) {
-	rows, err := q.query(ctx, q.getConsensusEventsForRoundStmt, getConsensusEventsForRound, arg.Height, arg.RoundNumber)
+	rows, err := q.db.QueryContext(ctx, getConsensusEventsForRound, arg.Height, arg.RoundNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ SELECT id, height, round_number, event_type, event_data, timestamp, created_at F
 `
 
 func (q *Queries) GetRecentConsensusEvents(ctx context.Context, limit int64) ([]ConsensusEvent, error) {
-	rows, err := q.query(ctx, q.getRecentConsensusEventsStmt, getRecentConsensusEvents, limit)
+	rows, err := q.db.QueryContext(ctx, getRecentConsensusEvents, limit)
 	if err != nil {
 		return nil, err
 	}

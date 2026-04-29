@@ -15,7 +15,7 @@ SELECT COUNT(*) FROM consensus_events
 `
 
 func (q *Queries) CountConsensusEvents(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countConsensusEventsStmt, countConsensusEvents)
+	row := q.db.QueryRowContext(ctx, countConsensusEvents)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -26,7 +26,7 @@ SELECT COUNT(*) FROM heights
 `
 
 func (q *Queries) CountHeights(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countHeightsStmt, countHeights)
+	row := q.db.QueryRowContext(ctx, countHeights)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -42,7 +42,7 @@ type CountHeightsInTimeWindowParams struct {
 }
 
 func (q *Queries) CountHeightsInTimeWindow(ctx context.Context, arg CountHeightsInTimeWindowParams) (int64, error) {
-	row := q.queryRow(ctx, q.countHeightsInTimeWindowStmt, countHeightsInTimeWindow, arg.BlockTime, arg.BlockTime_2)
+	row := q.db.QueryRowContext(ctx, countHeightsInTimeWindow, arg.BlockTime, arg.BlockTime_2)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -53,7 +53,7 @@ SELECT COUNT(*) FROM rounds
 `
 
 func (q *Queries) CountRounds(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countRoundsStmt, countRounds)
+	row := q.db.QueryRowContext(ctx, countRounds)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -64,7 +64,7 @@ SELECT COUNT(*) FROM validator_snapshots
 `
 
 func (q *Queries) CountValidatorSnapshots(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countValidatorSnapshotsStmt, countValidatorSnapshots)
+	row := q.db.QueryRowContext(ctx, countValidatorSnapshots)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -78,7 +78,7 @@ SELECT COUNT(*) FROM validators
 // COUNT helpers - one per table because sqlc can't parameterize
 // table identifiers.
 func (q *Queries) CountValidators(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countValidatorsStmt, countValidators)
+	row := q.db.QueryRowContext(ctx, countValidators)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -89,7 +89,7 @@ SELECT COUNT(*) FROM votes
 `
 
 func (q *Queries) CountVotes(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countVotesStmt, countVotes)
+	row := q.db.QueryRowContext(ctx, countVotes)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -110,7 +110,7 @@ type CountVotesForValidatorInTimeWindowParams struct {
 }
 
 func (q *Queries) CountVotesForValidatorInTimeWindow(ctx context.Context, arg CountVotesForValidatorInTimeWindowParams) (int64, error) {
-	row := q.queryRow(ctx, q.countVotesForValidatorInTimeWindowStmt, countVotesForValidatorInTimeWindow, arg.OperatorAddress, arg.BlockTime, arg.BlockTime_2)
+	row := q.db.QueryRowContext(ctx, countVotesForValidatorInTimeWindow, arg.OperatorAddress, arg.BlockTime, arg.BlockTime_2)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -126,7 +126,7 @@ type ListAllValidatorsRow struct {
 }
 
 func (q *Queries) ListAllValidators(ctx context.Context) ([]ListAllValidatorsRow, error) {
-	rows, err := q.query(ctx, q.listAllValidatorsStmt, listAllValidators)
+	rows, err := q.db.QueryContext(ctx, listAllValidators)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ type SampleHeightsRow struct {
 }
 
 func (q *Queries) SampleHeights(ctx context.Context) ([]SampleHeightsRow, error) {
-	rows, err := q.query(ctx, q.sampleHeightsStmt, sampleHeights)
+	rows, err := q.db.QueryContext(ctx, sampleHeights)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ type SampleValidatorsRow struct {
 }
 
 func (q *Queries) SampleValidators(ctx context.Context) ([]SampleValidatorsRow, error) {
-	rows, err := q.query(ctx, q.sampleValidatorsStmt, sampleValidators)
+	rows, err := q.db.QueryContext(ctx, sampleValidators)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ type SampleVotesRow struct {
 }
 
 func (q *Queries) SampleVotes(ctx context.Context) ([]SampleVotesRow, error) {
-	rows, err := q.query(ctx, q.sampleVotesStmt, sampleVotes)
+	rows, err := q.db.QueryContext(ctx, sampleVotes)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +279,7 @@ type SampleVotesForValidatorRow struct {
 }
 
 func (q *Queries) SampleVotesForValidator(ctx context.Context, arg SampleVotesForValidatorParams) ([]SampleVotesForValidatorRow, error) {
-	rows, err := q.query(ctx, q.sampleVotesForValidatorStmt, sampleVotesForValidator, arg.OperatorAddress, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, sampleVotesForValidator, arg.OperatorAddress, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ type SearchValidatorsByOperatorOrMonikerRow struct {
 }
 
 func (q *Queries) SearchValidatorsByOperatorOrMoniker(ctx context.Context, arg SearchValidatorsByOperatorOrMonikerParams) ([]SearchValidatorsByOperatorOrMonikerRow, error) {
-	rows, err := q.query(ctx, q.searchValidatorsByOperatorOrMonikerStmt, searchValidatorsByOperatorOrMoniker, arg.OperatorAddress, arg.LOWER)
+	rows, err := q.db.QueryContext(ctx, searchValidatorsByOperatorOrMoniker, arg.OperatorAddress, arg.LOWER)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ SELECT COUNT(*) FROM validators WHERE operator_address = ?
 `
 
 func (q *Queries) ValidatorExistsByOperator(ctx context.Context, operatorAddress string) (int64, error) {
-	row := q.queryRow(ctx, q.validatorExistsByOperatorStmt, validatorExistsByOperator, operatorAddress)
+	row := q.db.QueryRowContext(ctx, validatorExistsByOperator, operatorAddress)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

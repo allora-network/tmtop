@@ -56,7 +56,7 @@ type GetAllValidatorsSigningEfficiencyRow struct {
 // a precommit at the same height would otherwise appear twice and inflate
 // both total_blocks and blocks_signed.
 func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg GetAllValidatorsSigningEfficiencyParams) ([]GetAllValidatorsSigningEfficiencyRow, error) {
-	rows, err := q.query(ctx, q.getAllValidatorsSigningEfficiencyStmt, getAllValidatorsSigningEfficiency, arg.BlockTime, arg.BlockTime_2)
+	rows, err := q.db.QueryContext(ctx, getAllValidatorsSigningEfficiency, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ type GetProposerPerformanceRow struct {
 // rate always 100 %. The intended metric is "share of all proposing
 // opportunities," so the WHERE no longer filters by proposer.
 func (q *Queries) GetProposerPerformance(ctx context.Context, arg GetProposerPerformanceParams) (GetProposerPerformanceRow, error) {
-	row := q.queryRow(ctx, q.getProposerPerformanceStmt, getProposerPerformance,
+	row := q.db.QueryRowContext(ctx, getProposerPerformance,
 		arg.ProposerAddress,
 		arg.ProposerAddress_2,
 		arg.BlockTime,
@@ -169,7 +169,7 @@ type GetValidatorConsensusParticipationRow struct {
 
 // Calculate consensus participation rates for prevotes and precommits
 func (q *Queries) GetValidatorConsensusParticipation(ctx context.Context, arg GetValidatorConsensusParticipationParams) (GetValidatorConsensusParticipationRow, error) {
-	row := q.queryRow(ctx, q.getValidatorConsensusParticipationStmt, getValidatorConsensusParticipation, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
+	row := q.db.QueryRowContext(ctx, getValidatorConsensusParticipation, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	var i GetValidatorConsensusParticipationRow
 	err := row.Scan(
 		&i.TotalRounds,
@@ -229,7 +229,7 @@ type GetValidatorMissedBlockStreaksRow struct {
 
 // Find consecutive missed block sequences for a validator
 func (q *Queries) GetValidatorMissedBlockStreaks(ctx context.Context, arg GetValidatorMissedBlockStreaksParams) ([]GetValidatorMissedBlockStreaksRow, error) {
-	rows, err := q.query(ctx, q.getValidatorMissedBlockStreaksStmt, getValidatorMissedBlockStreaks, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
+	rows, err := q.db.QueryContext(ctx, getValidatorMissedBlockStreaks, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +294,7 @@ type GetValidatorPerformanceTimeSeriesRow struct {
 
 // Get signing efficiency over time buckets (hourly)
 func (q *Queries) GetValidatorPerformanceTimeSeries(ctx context.Context, arg GetValidatorPerformanceTimeSeriesParams) ([]GetValidatorPerformanceTimeSeriesRow, error) {
-	rows, err := q.query(ctx, q.getValidatorPerformanceTimeSeriesStmt, getValidatorPerformanceTimeSeries, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
+	rows, err := q.db.QueryContext(ctx, getValidatorPerformanceTimeSeries, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ type GetValidatorRankingRow struct {
 // height would have its block counts doubled (and ratios were preserved by
 // coincidence, but raw counts were wrong).
 func (q *Queries) GetValidatorRanking(ctx context.Context, arg GetValidatorRankingParams) ([]GetValidatorRankingRow, error) {
-	rows, err := q.query(ctx, q.getValidatorRankingStmt, getValidatorRanking, arg.BlockTime, arg.BlockTime_2)
+	rows, err := q.db.QueryContext(ctx, getValidatorRanking, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +456,7 @@ type GetValidatorSigningEfficiencyRow struct {
 
 // Calculate signing efficiency for a validator over a time window
 func (q *Queries) GetValidatorSigningEfficiency(ctx context.Context, arg GetValidatorSigningEfficiencyParams) (GetValidatorSigningEfficiencyRow, error) {
-	row := q.queryRow(ctx, q.getValidatorSigningEfficiencyStmt, getValidatorSigningEfficiency, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
+	row := q.db.QueryRowContext(ctx, getValidatorSigningEfficiency, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	var i GetValidatorSigningEfficiencyRow
 	err := row.Scan(
 		&i.TotalBlocks,
@@ -510,7 +510,7 @@ type GetValidatorUptimeRow struct {
 // v.id IS NOT NULL THEN h.height END) so each height contributes at
 // most once.
 func (q *Queries) GetValidatorUptime(ctx context.Context, arg GetValidatorUptimeParams) (GetValidatorUptimeRow, error) {
-	row := q.queryRow(ctx, q.getValidatorUptimeStmt, getValidatorUptime, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
+	row := q.db.QueryRowContext(ctx, getValidatorUptime, arg.ValidatorHexAddress, arg.BlockTime, arg.BlockTime_2)
 	var i GetValidatorUptimeRow
 	err := row.Scan(
 		&i.TotalBlocksInWindow,

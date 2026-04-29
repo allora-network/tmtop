@@ -24,7 +24,7 @@ type BatchCreateValidatorSnapshotsParams struct {
 }
 
 func (q *Queries) BatchCreateValidatorSnapshots(ctx context.Context, arg BatchCreateValidatorSnapshotsParams) error {
-	_, err := q.exec(ctx, q.batchCreateValidatorSnapshotsStmt, batchCreateValidatorSnapshots,
+	_, err := q.db.ExecContext(ctx, batchCreateValidatorSnapshots,
 		arg.Height,
 		arg.ValidatorHexAddress,
 		arg.VotingPower,
@@ -49,7 +49,7 @@ type CreateValidatorSnapshotParams struct {
 }
 
 func (q *Queries) CreateValidatorSnapshot(ctx context.Context, arg CreateValidatorSnapshotParams) (ValidatorSnapshot, error) {
-	row := q.queryRow(ctx, q.createValidatorSnapshotStmt, createValidatorSnapshot,
+	row := q.db.QueryRowContext(ctx, createValidatorSnapshot,
 		arg.Height,
 		arg.ValidatorHexAddress,
 		arg.VotingPower,
@@ -74,7 +74,7 @@ DELETE FROM validator_snapshots WHERE height < ?
 `
 
 func (q *Queries) DeleteValidatorSnapshotsOlderThan(ctx context.Context, height int64) error {
-	_, err := q.exec(ctx, q.deleteValidatorSnapshotsOlderThanStmt, deleteValidatorSnapshotsOlderThan, height)
+	_, err := q.db.ExecContext(ctx, deleteValidatorSnapshotsOlderThan, height)
 	return err
 }
 
@@ -90,7 +90,7 @@ type GetValidatorSnapshotParams struct {
 }
 
 func (q *Queries) GetValidatorSnapshot(ctx context.Context, arg GetValidatorSnapshotParams) (ValidatorSnapshot, error) {
-	row := q.queryRow(ctx, q.getValidatorSnapshotStmt, getValidatorSnapshot, arg.Height, arg.ValidatorHexAddress)
+	row := q.db.QueryRowContext(ctx, getValidatorSnapshot, arg.Height, arg.ValidatorHexAddress)
 	var i ValidatorSnapshot
 	err := row.Scan(
 		&i.ID,
@@ -111,7 +111,7 @@ ORDER BY voting_power DESC
 `
 
 func (q *Queries) GetValidatorSnapshotsForHeight(ctx context.Context, height int64) ([]ValidatorSnapshot, error) {
-	rows, err := q.query(ctx, q.getValidatorSnapshotsForHeightStmt, getValidatorSnapshotsForHeight, height)
+	rows, err := q.db.QueryContext(ctx, getValidatorSnapshotsForHeight, height)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ type GetValidatorSnapshotsForValidatorParams struct {
 }
 
 func (q *Queries) GetValidatorSnapshotsForValidator(ctx context.Context, arg GetValidatorSnapshotsForValidatorParams) ([]ValidatorSnapshot, error) {
-	rows, err := q.query(ctx, q.getValidatorSnapshotsForValidatorStmt, getValidatorSnapshotsForValidator, arg.ValidatorHexAddress, arg.Height)
+	rows, err := q.db.QueryContext(ctx, getValidatorSnapshotsForValidator, arg.ValidatorHexAddress, arg.Height)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ type UpsertValidatorSnapshotParams struct {
 }
 
 func (q *Queries) UpsertValidatorSnapshot(ctx context.Context, arg UpsertValidatorSnapshotParams) (ValidatorSnapshot, error) {
-	row := q.queryRow(ctx, q.upsertValidatorSnapshotStmt, upsertValidatorSnapshot,
+	row := q.db.QueryRowContext(ctx, upsertValidatorSnapshot,
 		arg.Height,
 		arg.ValidatorHexAddress,
 		arg.VotingPower,

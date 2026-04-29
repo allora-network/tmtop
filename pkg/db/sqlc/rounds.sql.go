@@ -25,7 +25,7 @@ type CreateRoundParams struct {
 }
 
 func (q *Queries) CreateRound(ctx context.Context, arg CreateRoundParams) (Round, error) {
-	row := q.queryRow(ctx, q.createRoundStmt, createRound,
+	row := q.db.QueryRowContext(ctx, createRound,
 		arg.Height,
 		arg.RoundNumber,
 		arg.Step,
@@ -50,7 +50,7 @@ DELETE FROM rounds WHERE height < ?
 `
 
 func (q *Queries) DeleteRoundsOlderThan(ctx context.Context, height int64) error {
-	_, err := q.exec(ctx, q.deleteRoundsOlderThanStmt, deleteRoundsOlderThan, height)
+	_, err := q.db.ExecContext(ctx, deleteRoundsOlderThan, height)
 	return err
 }
 
@@ -59,7 +59,7 @@ SELECT id, height, round_number, step, start_time, proposer_address, created_at 
 `
 
 func (q *Queries) GetRecentRounds(ctx context.Context, limit int64) ([]Round, error) {
-	rows, err := q.query(ctx, q.getRecentRoundsStmt, getRecentRounds, limit)
+	rows, err := q.db.QueryContext(ctx, getRecentRounds, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ type GetRoundParams struct {
 }
 
 func (q *Queries) GetRound(ctx context.Context, arg GetRoundParams) (Round, error) {
-	row := q.queryRow(ctx, q.getRoundStmt, getRound, arg.Height, arg.RoundNumber)
+	row := q.db.QueryRowContext(ctx, getRound, arg.Height, arg.RoundNumber)
 	var i Round
 	err := row.Scan(
 		&i.ID,
@@ -118,7 +118,7 @@ SELECT id, height, round_number, step, start_time, proposer_address, created_at 
 `
 
 func (q *Queries) GetRoundsForHeight(ctx context.Context, height int64) ([]Round, error) {
-	rows, err := q.query(ctx, q.getRoundsForHeightStmt, getRoundsForHeight, height)
+	rows, err := q.db.QueryContext(ctx, getRoundsForHeight, height)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ type GetRoundsInRangeParams struct {
 }
 
 func (q *Queries) GetRoundsInRange(ctx context.Context, arg GetRoundsInRangeParams) ([]Round, error) {
-	rows, err := q.query(ctx, q.getRoundsInRangeStmt, getRoundsInRange, arg.Height, arg.Height_2)
+	rows, err := q.db.QueryContext(ctx, getRoundsInRange, arg.Height, arg.Height_2)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ type UpdateRoundStepParams struct {
 }
 
 func (q *Queries) UpdateRoundStep(ctx context.Context, arg UpdateRoundStepParams) (Round, error) {
-	row := q.queryRow(ctx, q.updateRoundStepStmt, updateRoundStep, arg.Step, arg.Height, arg.RoundNumber)
+	row := q.db.QueryRowContext(ctx, updateRoundStep, arg.Step, arg.Height, arg.RoundNumber)
 	var i Round
 	err := row.Scan(
 		&i.ID,
@@ -234,7 +234,7 @@ type UpsertRoundParams struct {
 }
 
 func (q *Queries) UpsertRound(ctx context.Context, arg UpsertRoundParams) (Round, error) {
-	row := q.queryRow(ctx, q.upsertRoundStmt, upsertRound,
+	row := q.db.QueryRowContext(ctx, upsertRound,
 		arg.Height,
 		arg.RoundNumber,
 		arg.Step,

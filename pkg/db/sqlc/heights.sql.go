@@ -25,7 +25,7 @@ type CreateHeightParams struct {
 }
 
 func (q *Queries) CreateHeight(ctx context.Context, arg CreateHeightParams) (Height, error) {
-	row := q.queryRow(ctx, q.createHeightStmt, createHeight,
+	row := q.db.QueryRowContext(ctx, createHeight,
 		arg.Height,
 		arg.BlockHash,
 		arg.BlockTime,
@@ -49,7 +49,7 @@ DELETE FROM heights WHERE height < ?
 `
 
 func (q *Queries) DeleteHeightsOlderThan(ctx context.Context, height int64) error {
-	_, err := q.exec(ctx, q.deleteHeightsOlderThanStmt, deleteHeightsOlderThan, height)
+	_, err := q.db.ExecContext(ctx, deleteHeightsOlderThan, height)
 	return err
 }
 
@@ -58,7 +58,7 @@ SELECT height, block_hash, block_time, proposer_address, total_validators, creat
 `
 
 func (q *Queries) GetHeight(ctx context.Context, height int64) (Height, error) {
-	row := q.queryRow(ctx, q.getHeightStmt, getHeight, height)
+	row := q.db.QueryRowContext(ctx, getHeight, height)
 	var i Height
 	err := row.Scan(
 		&i.Height,
@@ -76,7 +76,7 @@ SELECT height, block_hash, block_time, proposer_address, total_validators, creat
 `
 
 func (q *Queries) GetHeights(ctx context.Context, limit int64) ([]Height, error) {
-	rows, err := q.query(ctx, q.getHeightsStmt, getHeights, limit)
+	rows, err := q.db.QueryContext(ctx, getHeights, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ SELECT height, block_hash, block_time, proposer_address, total_validators, creat
 `
 
 func (q *Queries) GetLatestHeight(ctx context.Context) (Height, error) {
-	row := q.queryRow(ctx, q.getLatestHeightStmt, getLatestHeight)
+	row := q.db.QueryRowContext(ctx, getLatestHeight)
 	var i Height
 	err := row.Scan(
 		&i.Height,
@@ -130,7 +130,7 @@ SELECT MIN(height) AS height FROM heights WHERE created_at >= ?
 // Returns the smallest height that was inserted at or after the given time.
 // Used by retention cleanup to translate a time-based cutoff into a height-based one.
 func (q *Queries) GetMinHeightAfterTime(ctx context.Context, createdAt sql.NullTime) (interface{}, error) {
-	row := q.queryRow(ctx, q.getMinHeightAfterTimeStmt, getMinHeightAfterTime, createdAt)
+	row := q.db.QueryRowContext(ctx, getMinHeightAfterTime, createdAt)
 	var height interface{}
 	err := row.Scan(&height)
 	return height, err
@@ -156,7 +156,7 @@ type UpsertHeightParams struct {
 }
 
 func (q *Queries) UpsertHeight(ctx context.Context, arg UpsertHeightParams) (Height, error) {
-	row := q.queryRow(ctx, q.upsertHeightStmt, upsertHeight,
+	row := q.db.QueryRowContext(ctx, upsertHeight,
 		arg.Height,
 		arg.BlockHash,
 		arg.BlockTime,

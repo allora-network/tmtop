@@ -25,7 +25,7 @@ type CreateValidatorParams struct {
 }
 
 func (q *Queries) CreateValidator(ctx context.Context, arg CreateValidatorParams) (Validator, error) {
-	row := q.queryRow(ctx, q.createValidatorStmt, createValidator,
+	row := q.db.QueryRowContext(ctx, createValidator,
 		arg.OperatorAddress,
 		arg.HexAddress,
 		arg.PublicKey,
@@ -51,7 +51,7 @@ DELETE FROM validators WHERE hex_address = ?
 `
 
 func (q *Queries) DeleteValidator(ctx context.Context, hexAddress string) error {
-	_, err := q.exec(ctx, q.deleteValidatorStmt, deleteValidator, hexAddress)
+	_, err := q.db.ExecContext(ctx, deleteValidator, hexAddress)
 	return err
 }
 
@@ -60,7 +60,7 @@ SELECT id, operator_address, hex_address, public_key, voting_power, moniker, cre
 `
 
 func (q *Queries) GetValidator(ctx context.Context, hexAddress string) (Validator, error) {
-	row := q.queryRow(ctx, q.getValidatorStmt, getValidator, hexAddress)
+	row := q.db.QueryRowContext(ctx, getValidator, hexAddress)
 	var i Validator
 	err := row.Scan(
 		&i.ID,
@@ -80,7 +80,7 @@ SELECT id, operator_address, hex_address, public_key, voting_power, moniker, cre
 `
 
 func (q *Queries) GetValidators(ctx context.Context) ([]Validator, error) {
-	rows, err := q.query(ctx, q.getValidatorsStmt, getValidators)
+	rows, err := q.db.QueryContext(ctx, getValidators)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ type GetValidatorsByHeightRow struct {
 }
 
 func (q *Queries) GetValidatorsByHeight(ctx context.Context, height int64) ([]GetValidatorsByHeightRow, error) {
-	rows, err := q.query(ctx, q.getValidatorsByHeightStmt, getValidatorsByHeight, height)
+	rows, err := q.db.QueryContext(ctx, getValidatorsByHeight, height)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ type UpdateValidatorParams struct {
 }
 
 func (q *Queries) UpdateValidator(ctx context.Context, arg UpdateValidatorParams) (Validator, error) {
-	row := q.queryRow(ctx, q.updateValidatorStmt, updateValidator,
+	row := q.db.QueryRowContext(ctx, updateValidator,
 		arg.OperatorAddress,
 		arg.PublicKey,
 		arg.VotingPower,
@@ -226,7 +226,7 @@ type UpsertValidatorParams struct {
 }
 
 func (q *Queries) UpsertValidator(ctx context.Context, arg UpsertValidatorParams) (Validator, error) {
-	row := q.queryRow(ctx, q.upsertValidatorStmt, upsertValidator,
+	row := q.db.QueryRowContext(ctx, upsertValidator,
 		arg.OperatorAddress,
 		arg.HexAddress,
 		arg.PublicKey,

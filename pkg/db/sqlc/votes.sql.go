@@ -27,7 +27,7 @@ type CreateVoteParams struct {
 }
 
 func (q *Queries) CreateVote(ctx context.Context, arg CreateVoteParams) (Vote, error) {
-	row := q.queryRow(ctx, q.createVoteStmt, createVote,
+	row := q.db.QueryRowContext(ctx, createVote,
 		arg.Height,
 		arg.RoundNumber,
 		arg.ValidatorHexAddress,
@@ -56,7 +56,7 @@ DELETE FROM votes WHERE height < ?
 `
 
 func (q *Queries) DeleteVotesOlderThan(ctx context.Context, height int64) error {
-	_, err := q.exec(ctx, q.deleteVotesOlderThanStmt, deleteVotesOlderThan, height)
+	_, err := q.db.ExecContext(ctx, deleteVotesOlderThan, height)
 	return err
 }
 
@@ -74,7 +74,7 @@ type GetVoteParams struct {
 }
 
 func (q *Queries) GetVote(ctx context.Context, arg GetVoteParams) (Vote, error) {
-	row := q.queryRow(ctx, q.getVoteStmt, getVote,
+	row := q.db.QueryRowContext(ctx, getVote,
 		arg.Height,
 		arg.RoundNumber,
 		arg.ValidatorHexAddress,
@@ -108,7 +108,7 @@ type GetVotesByTypeParams struct {
 }
 
 func (q *Queries) GetVotesByType(ctx context.Context, arg GetVotesByTypeParams) ([]Vote, error) {
-	rows, err := q.query(ctx, q.getVotesByTypeStmt, getVotesByType, arg.Height, arg.RoundNumber, arg.VoteType)
+	rows, err := q.db.QueryContext(ctx, getVotesByType, arg.Height, arg.RoundNumber, arg.VoteType)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ SELECT id, height, round_number, validator_hex_address, vote_type, block_hash, s
 `
 
 func (q *Queries) GetVotesForHeight(ctx context.Context, height int64) ([]Vote, error) {
-	rows, err := q.query(ctx, q.getVotesForHeightStmt, getVotesForHeight, height)
+	rows, err := q.db.QueryContext(ctx, getVotesForHeight, height)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ type GetVotesForRoundParams struct {
 }
 
 func (q *Queries) GetVotesForRound(ctx context.Context, arg GetVotesForRoundParams) ([]Vote, error) {
-	rows, err := q.query(ctx, q.getVotesForRoundStmt, getVotesForRound, arg.Height, arg.RoundNumber)
+	rows, err := q.db.QueryContext(ctx, getVotesForRound, arg.Height, arg.RoundNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ type GetVotesForValidatorParams struct {
 }
 
 func (q *Queries) GetVotesForValidator(ctx context.Context, arg GetVotesForValidatorParams) ([]Vote, error) {
-	rows, err := q.query(ctx, q.getVotesForValidatorStmt, getVotesForValidator, arg.ValidatorHexAddress, arg.Height)
+	rows, err := q.db.QueryContext(ctx, getVotesForValidator, arg.ValidatorHexAddress, arg.Height)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +292,7 @@ type GetVotingPowerForRoundRow struct {
 // twice in the join result, which would double-count its voting power in any
 // aggregate that doesn't filter by vote_type.
 func (q *Queries) GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error) {
-	row := q.queryRow(ctx, q.getVotingPowerForRoundStmt, getVotingPowerForRound, arg.Height, arg.Height_2, arg.RoundNumber)
+	row := q.db.QueryRowContext(ctx, getVotingPowerForRound, arg.Height, arg.Height_2, arg.RoundNumber)
 	var i GetVotingPowerForRoundRow
 	err := row.Scan(&i.PrevotePower, &i.PrecommitPower, &i.TotalPower)
 	return i, err
@@ -319,7 +319,7 @@ type UpsertVoteParams struct {
 }
 
 func (q *Queries) UpsertVote(ctx context.Context, arg UpsertVoteParams) (Vote, error) {
-	row := q.queryRow(ctx, q.upsertVoteStmt, upsertVote,
+	row := q.db.QueryRowContext(ctx, upsertVote,
 		arg.Height,
 		arg.RoundNumber,
 		arg.ValidatorHexAddress,
