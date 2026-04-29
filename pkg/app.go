@@ -119,6 +119,16 @@ func (a *App) Start() {
 	}
 
 	if a.Config.WithTopologyAPI {
+		// Construct the server synchronously here so a.topologyServer is
+		// safely visible to Stop() without a separate mutex; only the
+		// blocking Serve() call goes onto a goroutine.
+		a.topologyServer = tmhttp.NewServer(
+			a.Config.TopologyListenAddr,
+			topology.WithHTTPTopologyAPI(a.State),
+			topology.WithHTTPPeersAPI(a.State),
+			topology.WithHTTPDebugAPI(a.State),
+			topology.WithFrontendStaticAssets(),
+		)
 		a.spawn(a.ServeTopology)
 	}
 
@@ -208,14 +218,6 @@ func (a *App) Stop(ctx context.Context) error {
 }
 
 func (a *App) ServeTopology() {
-	a.topologyServer = tmhttp.NewServer(
-		a.Config.TopologyListenAddr,
-		//":8080",
-		topology.WithHTTPTopologyAPI(a.State),
-		topology.WithHTTPPeersAPI(a.State),
-		topology.WithHTTPDebugAPI(a.State),
-		topology.WithFrontendStaticAssets(),
-	)
 	if err := a.topologyServer.Serve(); err != nil && err != http.ErrServerClosed {
 		a.Logger.Error().Err(err).Msg("topology server error")
 	}
