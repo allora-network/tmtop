@@ -38,6 +38,10 @@ func NewRoundDataMap() *RoundDataMap {
 // mutate, or retain past the iteration without aliasing internal state.
 // Iter / ReverseIter yield through this so the concurrent-safety
 // contract isn't broken by the obvious "stash this pointer" anti-pattern.
+//
+// BlockID contains two HexBytes (= []byte) slices: Hash and
+// PartSetHeader.Hash. A struct-value copy duplicates the slice headers
+// but leaves the backing arrays aliased, so we copy those explicitly.
 func copyRoundData(rd *RoundData) *RoundData {
 	out := &RoundData{
 		Proposers: rd.Proposers.Copy(),
@@ -46,9 +50,20 @@ func copyRoundData(rd *RoundData) *RoundData {
 	for validator, votesMap := range rd.Votes {
 		dst := make(map[cptypes.SignedMsgType]ctypes.BlockID, len(votesMap))
 		for msgType, blockID := range votesMap {
-			dst[msgType] = blockID
+			dst[msgType] = copyBlockID(blockID)
 		}
 		out.Votes[validator] = dst
+	}
+	return out
+}
+
+func copyBlockID(b ctypes.BlockID) ctypes.BlockID {
+	out := b
+	if b.Hash != nil {
+		out.Hash = append(b.Hash[:0:0], b.Hash...)
+	}
+	if b.PartSetHeader.Hash != nil {
+		out.PartSetHeader.Hash = append(b.PartSetHeader.Hash[:0:0], b.PartSetHeader.Hash...)
 	}
 	return out
 }
