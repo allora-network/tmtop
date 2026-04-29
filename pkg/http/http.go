@@ -82,12 +82,12 @@ func (c *Client) Get(relativeURL string, target any) error {
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", fullURL, err)
 	}
+	defer func() { _ = body.Close() }()
 
 	if err := json.NewDecoder(body).Decode(target); err != nil {
 		return fmt.Errorf("decoding JSON from %s: %w", fullURL, err)
 	}
-
-	return body.Close()
+	return nil
 }
 
 func (c *Client) GetPlain(relativeURL string) ([]byte, error) {
