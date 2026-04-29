@@ -317,9 +317,20 @@ func (cs *ConsensusStore) LoadRoundDataMap(ctx context.Context, fromHeight, toHe
 		for _, vote := range votes {
 			var blockID ctypes.BlockID
 			if vote.BlockHash.Valid {
-				// Parse block hash - simplified for now
-				blockID = ctypes.BlockID{
-					Hash: []byte(vote.BlockHash.String),
+				// BlockHash was stored via blockID.Hash.String(), which
+				// is uppercase hex. Decode back to binary so the
+				// reconstructed BlockID matches what was originally
+				// observed; []byte(vote.BlockHash.String) would yield
+				// the ASCII bytes of the hex text, not the hash itself.
+				hash, err := hex.DecodeString(vote.BlockHash.String)
+				if err != nil {
+					cs.logger.Warn().Err(err).
+						Int64("height", height).
+						Int64("round", round.RoundNumber).
+						Str("hash", vote.BlockHash.String).
+						Msg("Failed to decode persisted block hash")
+				} else {
+					blockID = ctypes.BlockID{Hash: hash}
 				}
 			}
 
