@@ -39,8 +39,17 @@ func ComputeTopology(state *types.State, req ComputeTopologyRequest) (Graph, err
 
 	var g Graph
 
-	// Add nodes
+	// Add nodes — dedupe by ID. The same node can be reachable via
+	// multiple URLs (e.g. a configured https endpoint and the
+	// http://<remote_ip>:26657 form discovered through a peer list),
+	// which would otherwise produce two graph nodes with identical
+	// IDs and coincident geometry on the frontend.
+	seenIDs := butils.NewSet[string]()
 	for rpc := range includeNodes {
+		if seenIDs.Has(rpc.ID) {
+			continue
+		}
+		seenIDs.Add(rpc.ID)
 		g.Nodes = append(g.Nodes, rpc)
 		includeIDs.Add(rpc.ID)
 	}
@@ -48,14 +57,22 @@ func ComputeTopology(state *types.State, req ComputeTopologyRequest) (Graph, err
 	// Add edges
 	for rpc := range includeNodes {
 		for _, peer := range state.RPCPeers(rpc.URL) {
-			if !includeIDs.Has(string(peer.NodeInfo.DefaultNodeID)) {
+			peerID := string(peer.NodeInfo.DefaultNodeID)
+			if !includeIDs.Has(peerID) {
+				continue
+			}
+			// Skip self-loops. They surface when a node appears in
+			// includeNodes under more than one URL (see dedupe above)
+			// and one URL's /net_info reports the other. A zero-length
+			// edge produces NaN in three.js geometry.
+			if peerID == rpc.ID {
 				continue
 			}
 
 			if peer.IsOutbound {
-				g.AddConn(rpc.ID, string(peer.NodeInfo.DefaultNodeID), peer.ConnectionStatus)
+				g.AddConn(rpc.ID, peerID, peer.ConnectionStatus)
 			} else {
-				g.AddConn(string(peer.NodeInfo.DefaultNodeID), rpc.ID, peer.ConnectionStatus)
+				g.AddConn(peerID, rpc.ID, peer.ConnectionStatus)
 			}
 		}
 	}

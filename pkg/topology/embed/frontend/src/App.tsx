@@ -52,7 +52,7 @@ function App() {
                 target: conn.to,
                 id: `${conn.from}-${conn.to}`,
                 label: clickedEdges[`${conn.from}-${conn.to}`] ? `${humanizeBytes(conn.connectionStatus.SendMonitor.AvgRate)}/s\n${humanizeBytes(conn.connectionStatus.RecvMonitor.AvgRate)}/s` : '',
-                size: (conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate) / max * 5,
+                size: max > 0 ? (conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate) / max * 5 : 1,
             }))
 
         let copy = [...nodes]
