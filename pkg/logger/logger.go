@@ -30,7 +30,7 @@ func NewWriter(mb *bsync.Mailbox[string], config *configPkg.Config) Writer {
 	}
 
 	if config.DebugFile != "" {
-		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o755)
+		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 		if err != nil {
 			panic(err)
 		}
