@@ -111,6 +111,13 @@ func (c *Crawler) fetchOne(rpcURL string) {
 	rpc.ValidatorAddress = status.ValidatorInfo.Address.String()
 
 	for _, cv := range c.state.GetTMValidators() {
+		// CosmosValidator/ConsensusPubkey can be absent on validators
+		// where the Comet/Cosmos merge had no Cosmos-side match
+		// (chains during genesis fallback, or partial responses) —
+		// skip them rather than panicking on .Address().
+		if cv.CosmosValidator == nil || cv.CosmosValidator.ConsensusPubkey == nil {
+			continue
+		}
 		if strings.EqualFold(cv.CosmosValidator.ConsensusPubkey.Address().String(), rpc.ValidatorAddress) {
 			rpc.ValidatorMoniker = cv.CosmosValidator.Moniker
 			break
