@@ -180,6 +180,10 @@ func (rpc *CometRPC) getValidatorsViaDumpConsensusState() ([]*ctypes.Validator, 
 		return nil, fmt.Errorf("failed to unmarshal round state: %w", err)
 	}
 
+	if state.Validators == nil {
+		return nil, fmt.Errorf("malformed response from /dump_consensus_state: missing validator set")
+	}
+
 	return state.Validators.Validators, nil
 }
 
