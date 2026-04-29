@@ -98,6 +98,9 @@ type Querier interface {
 	// over the join: a validator with both a prevote and precommit row would appear
 	// twice in the join result, which would double-count its voting power in any
 	// aggregate that doesn't filter by vote_type.
+	// Both height bindings use sqlc.arg(height) so sqlc generates a single
+	// Height parameter and the subquery can never read a different height
+	// than the outer WHERE.
 	GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error)
 	ListAllValidators(ctx context.Context) ([]ListAllValidatorsRow, error)
 	SampleHeights(ctx context.Context) ([]SampleHeightsRow, error)

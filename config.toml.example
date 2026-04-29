@@ -7,9 +7,9 @@
 # or specify a custom location with --config-file flag.
 #
 # Settings in this file are loaded after CLI flag parsing and override
-# parsed CLI flag values for matching keys. Environment variables are
-# also supported with the TMTOP_ prefix (e.g., TMTOP_RPC_HOST) and follow
-# the same precedence as the config file.
+# parsed CLI flag values for matching keys. Environment variables
+# (TMTOP_ prefix, e.g. TMTOP_RPC_HOST) take higher precedence still and
+# override matching config-file values.
 
 # ==============================================================================
 # RPC Configuration
