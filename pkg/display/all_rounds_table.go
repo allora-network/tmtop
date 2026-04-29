@@ -156,8 +156,8 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 		nameCell := tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name))
 		vpCell := tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent))
 		if isCurrentProposer {
-			nameCell.SetBackgroundColor(tcell.ColorForestGreen)
-			vpCell.SetBackgroundColor(tcell.ColorForestGreen)
+			nameCell.SetBackgroundColor(tcell.ColorDimGray)
+			vpCell.SetBackgroundColor(tcell.ColorDimGray)
 		}
 		row = append(row, nameCell, vpCell)
 
@@ -175,7 +175,7 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 			//   2. This validator was the proposer for THIS specific
 			//      historical round — just that round's cell.
 			if isCurrentProposer || roundData.Proposers.Has(validator.GetDisplayAddress()) {
-				cell.SetBackgroundColor(tcell.ColorForestGreen)
+				cell.SetBackgroundColor(tcell.ColorDimGray)
 			}
 			row = append(row, cell)
 		}

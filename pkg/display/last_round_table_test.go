@@ -55,8 +55,8 @@ func TestLastRoundTable_HighlightsCurrentProposer(t *testing.T) {
 		t.Fatalf("proposer cell at row=%d col=%d is nil", row, col)
 	}
 	bg := cell.BackgroundColor
-	if bg != tcell.ColorForestGreen {
-		t.Errorf("proposer cell bg = %v, want ForestGreen; cell text=%q", bg, cell.Text)
+	if bg != tcell.ColorDimGray {
+		t.Errorf("proposer cell bg = %v, want DimGray; cell text=%q", bg, cell.Text)
 	}
 	if !strings.Contains(cell.Text, "2") {
 		t.Errorf("proposer cell should be validator 2, got text=%q", cell.Text)

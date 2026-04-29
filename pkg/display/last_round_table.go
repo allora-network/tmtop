@@ -179,7 +179,7 @@ func (d *LastRoundTableData) makeCells() [][]*tview.TableCell {
 			cell := tview.NewTableCell(text)
 
 			if isProposer {
-				cell.SetBackgroundColor(tcell.ColorForestGreen)
+				cell.SetBackgroundColor(tcell.ColorDimGray)
 			}
 
 			cells[row][column] = cell
