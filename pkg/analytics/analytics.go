@@ -55,12 +55,22 @@ func convertToFloat64(val interface{}) float64 {
 }
 
 func convertToTime(val interface{}) time.Time {
-	if val == nil {
+	// SQLite drivers vary in how they return DATETIME columns:
+	//   modernc.org/sqlite returns string for ad-hoc queries but
+	//   time.Time when the destination is sql.NullTime, and []byte for
+	//   some driver versions. Handle all three so the analytics layer
+	//   doesn't silently zero out timestamps.
+	switch v := val.(type) {
+	case nil:
 		return time.Time{}
-	}
-
-	if timeStr, ok := val.(string); ok {
-		if t, err := time.Parse("2006-01-02 15:04:05", timeStr); err == nil {
+	case time.Time:
+		return v
+	case []byte:
+		if t, err := time.Parse("2006-01-02 15:04:05", string(v)); err == nil {
+			return t
+		}
+	case string:
+		if t, err := time.Parse("2006-01-02 15:04:05", v); err == nil {
 			return t
 		}
 	}
