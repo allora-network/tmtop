@@ -269,15 +269,14 @@ const getVotingPowerForRound = `-- name: GetVotingPowerForRound :one
 SELECT
     SUM(CASE WHEN v.vote_type = 1 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as prevote_power,
     SUM(CASE WHEN v.vote_type = 2 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as precommit_power,
-    (SELECT COALESCE(SUM(vs2.voting_power), 0) FROM validator_snapshots vs2 WHERE vs2.height = ?) as total_power
+    (SELECT COALESCE(SUM(vs2.voting_power), 0) FROM validator_snapshots vs2 WHERE vs2.height = ?1) as total_power
 FROM votes v
 JOIN validator_snapshots vs ON v.validator_hex_address = vs.validator_hex_address AND v.height = vs.height
-WHERE v.height = ? AND v.round_number = ?
+WHERE v.height = ?1 AND v.round_number = ?2
 `
 
 type GetVotingPowerForRoundParams struct {
 	Height      int64 `json:"height"`
-	Height_2    int64 `json:"height_2"`
 	RoundNumber int64 `json:"round_number"`
 }
 
@@ -291,8 +290,11 @@ type GetVotingPowerForRoundRow struct {
 // over the join: a validator with both a prevote and precommit row would appear
 // twice in the join result, which would double-count its voting power in any
 // aggregate that doesn't filter by vote_type.
+// Both height bindings use sqlc.arg(height) so sqlc generates a single
+// Height parameter and the subquery can never read a different height
+// than the outer WHERE.
 func (q *Queries) GetVotingPowerForRound(ctx context.Context, arg GetVotingPowerForRoundParams) (GetVotingPowerForRoundRow, error) {
-	row := q.db.QueryRowContext(ctx, getVotingPowerForRound, arg.Height, arg.Height_2, arg.RoundNumber)
+	row := q.db.QueryRowContext(ctx, getVotingPowerForRound, arg.Height, arg.RoundNumber)
 	var i GetVotingPowerForRoundRow
 	err := row.Scan(&i.PrevotePower, &i.PrecommitPower, &i.TotalPower)
 	return i, err

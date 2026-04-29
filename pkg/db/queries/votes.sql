@@ -40,13 +40,16 @@ RETURNING *;
 -- over the join: a validator with both a prevote and precommit row would appear
 -- twice in the join result, which would double-count its voting power in any
 -- aggregate that doesn't filter by vote_type.
+-- Both height bindings use sqlc.arg(height) so sqlc generates a single
+-- Height parameter and the subquery can never read a different height
+-- than the outer WHERE.
 SELECT
     SUM(CASE WHEN v.vote_type = 1 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as prevote_power,
     SUM(CASE WHEN v.vote_type = 2 AND v.block_hash IS NOT NULL THEN vs.voting_power ELSE 0 END) as precommit_power,
-    (SELECT COALESCE(SUM(vs2.voting_power), 0) FROM validator_snapshots vs2 WHERE vs2.height = ?) as total_power
+    (SELECT COALESCE(SUM(vs2.voting_power), 0) FROM validator_snapshots vs2 WHERE vs2.height = sqlc.arg(height)) as total_power
 FROM votes v
 JOIN validator_snapshots vs ON v.validator_hex_address = vs.validator_hex_address AND v.height = vs.height
-WHERE v.height = ? AND v.round_number = ?;
+WHERE v.height = sqlc.arg(height) AND v.round_number = sqlc.arg(round_number);
 
 -- name: DeleteVotesOlderThan :exec
 DELETE FROM votes WHERE height < ?;
