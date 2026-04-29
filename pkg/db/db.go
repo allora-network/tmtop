@@ -20,13 +20,15 @@ var migration001Initial string
 //go:embed migrations/002_drop_operator_unique.sql
 var migration002DropOperatorUnique string
 
+type migration struct {
+	version string
+	sql     string
+}
+
 // migrations is the ordered list of schema migrations. Each entry's
 // SQL is executed only once; the version name is recorded in the
 // migrations table.
-var migrations = []struct {
-	version string
-	sql     string
-}{
+var migrations = []migration{
 	{"001_initial", migration001Initial},
 	{"002_drop_operator_unique", migration002DropOperatorUnique},
 }
@@ -132,12 +134,33 @@ func (d *DB) migrate() error {
 			continue
 		}
 
-		if _, err := d.db.Exec(m.sql); err != nil {
-			return fmt.Errorf("applying migration %s: %w", m.version, err)
+		// Apply the migration and the version-record insert in a single
+		// transaction. Without this, a successful migration that fails to
+		// record its version would leave the schema half-applied: the next
+		// startup would re-run the migration and trip a "table already
+		// exists" / index-already-exists error, requiring manual recovery.
+		if err := d.applyMigration(m); err != nil {
+			return err
 		}
-		if _, err := d.db.Exec("INSERT INTO migrations (version) VALUES (?)", m.version); err != nil {
-			return fmt.Errorf("recording migration %s: %w", m.version, err)
-		}
+	}
+	return nil
+}
+
+func (d *DB) applyMigration(m migration) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("starting migration %s tx: %w", m.version, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(m.sql); err != nil {
+		return fmt.Errorf("applying migration %s: %w", m.version, err)
+	}
+	if _, err := tx.Exec("INSERT INTO migrations (version) VALUES (?)", m.version); err != nil {
+		return fmt.Errorf("recording migration %s: %w", m.version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing migration %s: %w", m.version, err)
 	}
 	return nil
 }
