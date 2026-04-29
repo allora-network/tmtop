@@ -16,7 +16,7 @@ type CometGenesisChunkResponse struct {
 }
 
 type CometGenesisChunkResult struct {
-	Chunk string `json:"string"`
+	Chunk string `json:"chunk"`
 	Total string `json:"total"`
 	Data  []byte `json:"data"`
 }
