@@ -41,6 +41,15 @@ func New(
 func (r *Refresher) Run() {
 	r.refresh()
 
+	if r.interval <= 0 {
+		// time.NewTicker panics on a non-positive duration. Misconfigured
+		// intervals can sneak through CLI/config validation, so log and
+		// fall back to the initial-only fetch rather than crashing the
+		// process.
+		r.logger.Error().Dur("interval", r.interval).Msg("non-positive refresh interval, refresher exiting after initial fetch")
+		return
+	}
+
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
