@@ -2,9 +2,10 @@ package display
 
 import (
 	"fmt"
+	"strconv"
+
 	"main/pkg/types"
 	"main/pkg/utils"
-	"strconv"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/gdamore/tcell/v2"
@@ -15,12 +16,11 @@ type AllRoundsTableData struct {
 	tview.TableContentReadOnly
 
 	RoundData     *types.RoundDataMap
-	TMValidators  types.TMValidators
+	Validators    []types.TMValidator
 	DisableEmojis bool
 	Transpose     bool
 	CurrentHeight int64
-
-	MaxHistorySize int
+	CurrentRound  int32
 
 	cells [][]*tview.TableCell
 	mutex *utils.NoopLocker
@@ -28,11 +28,10 @@ type AllRoundsTableData struct {
 
 func NewAllRoundsTableData(disableEmojis bool, transpose bool) *AllRoundsTableData {
 	return &AllRoundsTableData{
-		DisableEmojis:  disableEmojis,
-		Transpose:      transpose,
-		MaxHistorySize: 10,
-		cells:          [][]*tview.TableCell{},
-		mutex:          &utils.NoopLocker{},
+		DisableEmojis: disableEmojis,
+		Transpose:     transpose,
+		cells:         [][]*tview.TableCell{},
+		mutex:         &utils.NoopLocker{},
 	}
 }
 
@@ -69,15 +68,23 @@ func (d *AllRoundsTableData) GetColumnCount() int {
 	return len(d.cells[0])
 }
 
-// SetTMValidators sets the unified validator collection (preferred)
 func (d *AllRoundsTableData) SetTMValidators(validators types.TMValidators, height int64) {
 	d.mutex.Lock()
 
 	if d.CurrentHeight == 0 && height > 0 {
 		d.CurrentHeight = height
 	}
-	d.TMValidators = validators
+	d.Validators = validators
 
+	d.mutex.Unlock()
+}
+
+// SetCurrentRound records the round number we should treat as "now"
+// for proposer-row highlighting.
+func (d *AllRoundsTableData) SetCurrentRound(height int64, round int32) {
+	d.mutex.Lock()
+	d.CurrentHeight = height
+	d.CurrentRound = round
 	d.mutex.Unlock()
 }
 
@@ -101,12 +108,12 @@ func (d *AllRoundsTableData) Update() {
 	d.cells = cells
 }
 
-// Create cells for the table
+// Create cells for the table.
 func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	cells := [][]*tview.TableCell{}
 
 	// Check if we have validators to display
-	if len(d.TMValidators) == 0 {
+	if len(d.Validators) == 0 {
 		return cells
 	}
 
@@ -134,14 +141,25 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 	}
 	cells = append(cells, headerRow)
 
+	// Identify the current proposer (if any) so we can highlight the
+	// whole row across the screen, not just the per-round proposer cell.
+	currentProposers := d.RoundData.GetProposers(d.CurrentHeight, d.CurrentRound)
+
 	// Create validator rows using TMValidators
-	for i, validator := range d.TMValidators {
+	for i, validator := range d.Validators {
 		row := []*tview.TableCell{}
+
+		isCurrentProposer := currentProposers != nil && currentProposers.Has(validator.GetDisplayAddress())
 
 		// enumerated validator name
 		name := validator.GetDisplayName()
-		row = append(row, tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name)))
-		row = append(row, tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent)))
+		nameCell := tview.NewTableCell(fmt.Sprintf("%d. %s", i+1, name))
+		vpCell := tview.NewTableCell(fmt.Sprintf("(%.2f%%)", validator.VotingPowerPercent))
+		if isCurrentProposer {
+			nameCell.SetBackgroundColor(tcell.ColorDimGray)
+			vpCell.SetBackgroundColor(tcell.ColorDimGray)
+		}
+		row = append(row, nameCell, vpCell)
 
 		for _, roundData := range d.RoundData.ReverseIter() {
 			valVotes := roundData.Votes[validator.GetDisplayAddress()]
@@ -151,8 +169,13 @@ func (d *AllRoundsTableData) createCells() [][]*tview.TableCell {
 			precommit := types.VoteStateFromVotesMap(valVotes, cmtproto.PrecommitType)
 
 			cell := tview.NewTableCell(" " + precommit.Serialize(d.DisableEmojis) + prevote.Serialize(d.DisableEmojis) + " ")
-			if roundData.Proposers.Has(validator.GetDisplayAddress()) {
-				cell.SetBackgroundColor(tcell.ColorForestGreen)
+			// Two highlight conditions, both green:
+			//   1. This validator is the proposer for the current
+			//      (in-progress) height/round — entire row gets the bar.
+			//   2. This validator was the proposer for THIS specific
+			//      historical round — just that round's cell.
+			if isCurrentProposer || roundData.Proposers.Has(validator.GetDisplayAddress()) {
+				cell.SetBackgroundColor(tcell.ColorDimGray)
 			}
 			row = append(row, cell)
 		}

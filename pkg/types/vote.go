@@ -5,7 +5,7 @@ import (
 	ctypes "github.com/cometbft/cometbft/types"
 )
 
-// VoteState represents the state of a validator's vote using CometBFT types directly
+// VoteState represents the state of a validator's vote using CometBFT types directly.
 type VoteState int
 
 const (
@@ -14,7 +14,7 @@ const (
 	VoteStateForBlock
 )
 
-// VoteStateFromCometBFT determines vote state from CometBFT types
+// VoteStateFromCometBFT determines vote state from CometBFT types.
 func VoteStateFromCometBFT(voteExists bool, blockID ctypes.BlockID) VoteState {
 	if !voteExists {
 		return VoteStateNone
@@ -25,13 +25,13 @@ func VoteStateFromCometBFT(voteExists bool, blockID ctypes.BlockID) VoteState {
 	return VoteStateForBlock
 }
 
-// VoteStateFromVotesMap determines vote state from votes map
+// VoteStateFromVotesMap determines vote state from votes map.
 func VoteStateFromVotesMap(votesMap map[cptypes.SignedMsgType]ctypes.BlockID, msgType cptypes.SignedMsgType) VoteState {
 	blockID, exists := votesMap[msgType]
 	return VoteStateFromCometBFT(exists, blockID)
 }
 
-// Serialize returns UI representation of vote state
+// Serialize returns UI representation of vote state.
 func (v VoteState) Serialize(disableEmojis bool) string {
 	if disableEmojis {
 		switch v {
@@ -57,4 +57,3 @@ func (v VoteState) Serialize(disableEmojis bool) string {
 		return ""
 	}
 }
-

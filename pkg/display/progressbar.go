@@ -1,10 +1,11 @@
-package types
+package display
 
 import (
 	"fmt"
 	"strings"
 )
 
+// ProgressBar renders a horizontal progress bar with a centered label.
 type ProgressBar struct {
 	Width    int
 	Height   int
@@ -23,7 +24,6 @@ func (p ProgressBar) Serialize() string {
 		if value {
 			return "green"
 		}
-
 		return "-"
 	}
 

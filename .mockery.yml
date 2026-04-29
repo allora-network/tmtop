@@ -1,0 +1,20 @@
+all: false
+dir: '{{.InterfaceDir}}/mocks'
+filename: '{{.InterfaceName}}.go'
+force-file-write: true
+formatter: goimports
+generate: true
+log-level: info
+pkgname: mocks
+structname: 'Mock{{.InterfaceName}}'
+template: testify
+packages:
+  main/pkg/fetcher:
+    interfaces:
+      Fetcher:
+  main/pkg/db:
+    interfaces:
+      ConsensusStorer:
+  main/pkg/display:
+    interfaces:
+      Display:

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, forwardRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, forwardRef } from 'react'
 import { fetchTopologyJSON, ComputeTopologyParams, fetchPeers, JSONResponse, RPC, Conn } from '@/lib/api'
 import { GraphCanvas, GraphCanvasRef, InternalGraphNode, InternalGraphEdge, InternalGraphPosition, layoutProvider, recommendLayout, useSelection } from 'reagraph'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
@@ -13,26 +13,66 @@ function App() {
 
     const [graph, setGraph] = useState<{ nodes: InternalGraphNode[], edges: InternalGraphEdge[] }>({ nodes: [], edges: [] })
     const [apiData, setAPIData] = useState<JSONResponse>({ nodes: [], conns: [] })
+    // peerStats mirrors the most recent /topology fetch. The graph
+    // useEffect reads from apiData (re-render only on Generate), while
+    // the sidebar reads from peerStats (refreshes via polling) so the
+    // 1s poll doesn't disturb the cached force-directed layout.
+    const [peerStats, setPeerStats] = useState<JSONResponse>({ nodes: [], conns: [] })
     const [clickedEdges, setClickedEdges] = useState<Record<string, boolean>>({})
     const [minBytesSec, setMinBytesSec] = useState<Number | null>(null)
     const [selectedNode, setSelectedNode] = useState<RPC | null>(null)
     const nodeRef = useRef(new Map<string, InternalGraphPosition>())
     const graphRef = useRef<GraphCanvasRef | null>(null)
+    // Last params used by Generate. The sidebar poll replays them so
+    // it sees the same node set the user is currently viewing.
+    const lastFetchParamsRef = useRef<ComputeTopologyParams | null>(null)
 
     const renderGraph = useCallback(async (selectedPeers: { [id: string]: boolean }, crawlDistance: number) => {
         setMinBytesSec(minBytesSec)
-        const graph = await fetchTopologyJSON({
+        const fetchParams: ComputeTopologyParams = {
             ...params,
             crawlDistance,
             minBytesSec: minBytesSec || null,
             includeNodes: Object.keys(selectedPeers).filter(url => selectedPeers[url]),
-        })
+        }
+        lastFetchParamsRef.current = fetchParams
+        const graph = await fetchTopologyJSON(fetchParams)
         setAPIData(graph)
-    }, [params, fetchTopologyJSON, setAPIData, minBytesSec])
+        setPeerStats(graph)
+    }, [params, fetchTopologyJSON, setAPIData, setPeerStats, minBytesSec])
+
+    useEffect(() => {
+        if (!selectedNode || !lastFetchParamsRef.current) return
+        const tick = async () => {
+            try {
+                const fresh = await fetchTopologyJSON(lastFetchParamsRef.current!)
+                setPeerStats(fresh)
+            } catch (e) {
+                console.warn('peer stats poll failed', e)
+            }
+        }
+        const id = setInterval(tick, 1000)
+        return () => clearInterval(id)
+    }, [selectedNode?.id])
+
+    const connectedPeers = useMemo(() => {
+        if (!selectedNode) return []
+        return (peerStats.conns || [])
+            .filter(conn => conn.from === selectedNode.id || conn.to === selectedNode.id)
+            .map(conn => {
+                const peerId = conn.from === selectedNode.id ? conn.to : conn.from
+                const peer = (peerStats.nodes || []).find(n => n.id === peerId)
+                return {
+                    peer,
+                    connectionStatus: conn.connectionStatus,
+                    isOutbound: conn.from === selectedNode.id
+                }
+            })
+    }, [selectedNode?.id, peerStats])
 
     useEffect(() => {
         let max = (apiData.conns || []).reduce((max, conn) => {
-            let total = conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate
+            let total = conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate
             if (total > max) {
                 return total
             }
@@ -46,13 +86,13 @@ function App() {
         }))
 
         const edges = (apiData.conns || [])
-            .filter(conn => conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate >= (minBytesSec || 0).valueOf())
+            .filter(conn => conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate >= (minBytesSec || 0).valueOf())
             .map(conn => ({
                 source: conn.from,
                 target: conn.to,
                 id: `${conn.from}-${conn.to}`,
-                label: clickedEdges[`${conn.from}-${conn.to}`] ? `${humanizeBytes(conn.connectionStatus.send_monitor.avg_rate)}/s\n${humanizeBytes(conn.connectionStatus.recv_monitor.avg_rate)}/s` : '',
-                size: (conn.connectionStatus.send_monitor.avg_rate + conn.connectionStatus.recv_monitor.avg_rate) / max * 5,
+                label: clickedEdges[`${conn.from}-${conn.to}`] ? `${humanizeBytes(conn.connectionStatus.SendMonitor.AvgRate)}/s\n${humanizeBytes(conn.connectionStatus.RecvMonitor.AvgRate)}/s` : '',
+                size: max > 0 ? (conn.connectionStatus.SendMonitor.AvgRate + conn.connectionStatus.RecvMonitor.AvgRate) / max * 5 : 1,
             }))
 
         let copy = [...nodes]
@@ -101,22 +141,7 @@ function App() {
 
     function handleNodeClick(node: InternalGraphNode) {
         const selectedRPC = (apiData.nodes || []).find(n => n.id === node.id)
-        if (selectedRPC) {
-            const connectedPeers = (apiData.conns || [])
-                .filter(conn => conn.from === selectedRPC.id || conn.to === selectedRPC.id)
-                .map(conn => {
-                    const peerId = conn.from === selectedRPC.id ? conn.to : conn.from
-                    const peer = (apiData.nodes || []).find(n => n.id === peerId)
-                    return {
-                        peer,
-                        connectionStatus: conn.connectionStatus,
-                        isOutbound: conn.from === selectedRPC.id
-                    }
-                })
-            setSelectedNode({ ...selectedRPC, connectedPeers })
-        } else {
-            setSelectedNode(null)
-        }
+        setSelectedNode(selectedRPC || null)
     }
 
     function handleCanvasClick() {
@@ -193,7 +218,7 @@ function App() {
                         backgroundColor: 'rgba(36, 36, 36, 0.9)',
                         padding: '20px',
                         overflowY: 'auto'
-                    }}><NodeDetails node={selectedNode} /></div>
+                    }}><NodeDetails node={selectedNode} connectedPeers={connectedPeers} /></div>
                 )}
             </div>
         </>
@@ -274,15 +299,13 @@ function Sidebar(props: {
     )
 }
 
-type NodeWithPeers = RPC & {
-    connectedPeers: Array<{
-        peer: RPC | undefined,
-        connectionStatus: Conn['connectionStatus'],
-        isOutbound: boolean
-    }>
+type ConnectedPeer = {
+    peer: RPC | undefined,
+    connectionStatus: Conn['connectionStatus'],
+    isOutbound: boolean,
 }
 
-function NodeDetails({ node }: { node: NodeWithPeers }) {
+function NodeDetails({ node, connectedPeers }: { node: RPC, connectedPeers: ConnectedPeer[] }) {
     return (
         <div>
             <h2>{node.moniker}</h2>
@@ -317,12 +340,12 @@ function NodeDetails({ node }: { node: NodeWithPeers }) {
                     </tr>
                 </thead>
                 <tbody>
-                    {node.connectedPeers.map((peerInfo, index) => (
+                    {connectedPeers.map((peerInfo, index) => (
                         <tr key={index}>
                             <td>{peerInfo.peer?.moniker || 'Unknown'}</td>
                             <td>{peerInfo.isOutbound ? 'Outbound' : 'Inbound'}</td>
-                            <td>{humanizeBytes(peerInfo.connectionStatus.send_monitor.avg_rate)}/s</td>
-                            <td>{humanizeBytes(peerInfo.connectionStatus.recv_monitor.avg_rate)}/s</td>
+                            <td>{humanizeBytes(peerInfo.connectionStatus.SendMonitor.AvgRate)}/s</td>
+                            <td>{humanizeBytes(peerInfo.connectionStatus.RecvMonitor.AvgRate)}/s</td>
                         </tr>
                     ))}
                 </tbody>
@@ -330,10 +353,10 @@ function NodeDetails({ node }: { node: NodeWithPeers }) {
             <h3>Connection Statistics</h3>
             <table>
                 <tbody>
-                    <tr><td>Total Send Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.send_monitor.avg_rate, 0))}/s</td></tr>
-                    <tr><td>Total Receive Rate:</td><td>{humanizeBytes(node.connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.recv_monitor.avg_rate, 0))}/s</td></tr>
-                    <tr><td>Outbound Connections:</td><td>{node.connectedPeers.filter(peer => peer.isOutbound).length}</td></tr>
-                    <tr><td>Inbound Connections:</td><td>{node.connectedPeers.filter(peer => !peer.isOutbound).length}</td></tr>
+                    <tr><td>Total Send Rate:</td><td>{humanizeBytes(connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.SendMonitor.AvgRate, 0))}/s</td></tr>
+                    <tr><td>Total Receive Rate:</td><td>{humanizeBytes(connectedPeers.reduce((sum, peer) => sum + peer.connectionStatus.RecvMonitor.AvgRate, 0))}/s</td></tr>
+                    <tr><td>Outbound Connections:</td><td>{connectedPeers.filter(peer => peer.isOutbound).length}</td></tr>
+                    <tr><td>Inbound Connections:</td><td>{connectedPeers.filter(peer => !peer.isOutbound).length}</td></tr>
                 </tbody>
             </table>
         </div>

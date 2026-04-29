@@ -1,12 +1,15 @@
 package display
 
 import (
+	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
+	"time"
+
 	configPkg "main/pkg/config"
 	"main/pkg/types"
 	"main/static"
-	"strings"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -53,8 +56,7 @@ type Wrapper struct {
 	State  *types.State
 	Logger zerolog.Logger
 
-	PauseChannel chan bool
-	IsPaused     bool
+	paused *atomic.Bool
 
 	IsRPCListDisplayed bool
 	IsHelpDisplayed    bool
@@ -68,7 +70,7 @@ func NewWrapper(
 	config *configPkg.Config,
 	state *types.State,
 	logger zerolog.Logger,
-	pauseChannel chan bool,
+	paused *atomic.Bool,
 	appVersion string,
 ) *Wrapper {
 	lastRoundTableData := NewLastRoundTableData(DefaultColumnsCount, config.DisableEmojis, false)
@@ -154,8 +156,7 @@ func NewWrapper(
 		InfoBlockWidth:        2,
 		ColumnsCount:          DefaultColumnsCount,
 		Mode:                  DefaultMode,
-		PauseChannel:          pauseChannel,
-		IsPaused:              false,
+		paused:                paused,
 		IsHelpDisplayed:       false,
 		DisableEmojis:         config.DisableEmojis,
 		Transpose:             false,
@@ -163,7 +164,7 @@ func NewWrapper(
 	}
 }
 
-func (w *Wrapper) Start() {
+func (w *Wrapper) Start() error {
 	w.RPCsTable.SetSelectedFunc(func(row, col int) {
 		rpc, ok := w.State.RPCAtIndex(row)
 		if ok {
@@ -215,8 +216,7 @@ func (w *Wrapper) Start() {
 		}
 
 		if event.Rune() == 'p' {
-			w.IsPaused = !w.IsPaused
-			w.PauseChannel <- w.IsPaused
+			w.paused.Store(!w.paused.Load())
 		}
 
 		if event.Key() == tcell.KeyTAB {
@@ -243,17 +243,43 @@ func (w *Wrapper) Start() {
 	_, _ = fmt.Fprint(w.ProgressTextView, "Loading...")
 
 	w.App.SetAfterDrawFunc(func(screen tcell.Screen) {
+		// LastRoundTable isn't drawn until the user switches to its mode,
+		// so its inner rect is 0 at startup under the default mode. Only
+		// override the seeded default (DefaultColumnsCount) when we
+		// actually have a real width to compute from, otherwise we'd
+		// leave the table with zero columns and render nothing.
 		_, _, width, _ := w.LastRoundTable.GetInnerRect()
-		columns := width / 50
-		w.LastRoundTableData.SetColumnsCount(columns)
-
+		if width > 0 {
+			columns := width / 50
+			if columns < 1 {
+				columns = 1
+			}
+			// Keep w.ColumnsCount in sync so the m/l keybindings
+			// increment/decrement from the auto-computed value rather
+			// than the stale DefaultColumnsCount.
+			w.ColumnsCount = columns
+			w.LastRoundTableData.SetColumnsCount(columns)
+		}
 		w.App.SetAfterDrawFunc(nil)
 	})
 
 	if err := w.App.Run(); err != nil {
 		w.Logger.Error().Err(err).Msg("Could not draw screen")
 		w.cleanup()
+		return err
 	}
+	return nil
+}
+
+// Stop asks the tview application to exit. The context is accepted
+// for interface symmetry with other components but tview's Stop is
+// synchronous.
+func (w *Wrapper) Stop(_ context.Context) error {
+	if w.App != nil {
+		w.App.Stop()
+	}
+	w.restoreTerminal()
+	return nil
 }
 
 func (w *Wrapper) ToggleDebug() {
@@ -275,26 +301,38 @@ func (w *Wrapper) SetState(state *types.State) {
 	w.App.QueueUpdateDraw(func() {
 		w.State = state
 
-		// Use TMValidators
-		w.LastRoundTableData.SetTMValidators(state.GetTMValidators(), state.ConsensusStateError)
+		validators := state.GetTMValidators()
+		consensusHeight, consensusRound, _, _ := state.GetConsensusHeight()
+		w.LastRoundTableData.SetTMValidators(validators, state.GetConsensusStateError())
+		w.LastRoundTableData.SetRoundData(state.VotesByRound)
+		w.LastRoundTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 		if w.AllRoundsTableData != nil {
-			w.AllRoundsTableData.SetTMValidators(state.GetTMValidators(), state.Height)
+			w.AllRoundsTableData.SetTMValidators(validators, consensusHeight)
+			w.AllRoundsTableData.SetCurrentRound(consensusHeight, int32(consensusRound))
 			w.AllRoundsTableData.SetRoundData(state.VotesByRound)
 			w.AllRoundsTableData.Update()
+			// Pin the view to the top of the validator list. Tview's
+			// Table auto-enables trackEnd whenever the data length from
+			// the current row offset doesn't fill the visible area, which
+			// in practice scrolls validators 1..N off the top and shows
+			// only the bottom slice. The proposer is normally one of the
+			// top-VP validators, so it would be the slice that gets
+			// hidden — and the green row highlight ends up off-screen.
+			w.AllRoundsTable.ScrollToBeginning()
 		}
-		w.NetInfoTableData.SetNetInfo(state.NetInfo)
+		w.NetInfoTableData.SetNetInfo(state.GetNetInfo())
 		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
 
 		w.ConsensusInfoTextView.Clear()
 		w.ChainInfoTextView.Clear()
 		w.ProgressTextView.Clear()
-		_, _ = fmt.Fprint(w.ConsensusInfoTextView, state.SerializeConsensus(w.Timezone))
-		_, _ = fmt.Fprint(w.ChainInfoTextView, state.SerializeChainInfo(w.Timezone))
+		_, _ = fmt.Fprint(w.ConsensusInfoTextView, SerializeConsensus(state, w.Timezone))
+		_, _ = fmt.Fprint(w.ChainInfoTextView, SerializeChainInfo(state, w.Timezone))
 
 		_, _, width, height := w.ConsensusInfoTextView.GetInnerRect()
-		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrevotesProgressbar(width, height/2))
+		_, _ = fmt.Fprint(w.ProgressTextView, SerializePrevotesProgressbar(state, width, height/2))
 		_, _ = fmt.Fprint(w.ProgressTextView, "\n")
-		_, _ = fmt.Fprint(w.ProgressTextView, state.SerializePrecommitsProgressbar(width, height/2))
+		_, _ = fmt.Fprint(w.ProgressTextView, SerializePrecommitsProgressbar(state, width, height/2))
 
 		// w.App.Draw()
 	})
@@ -340,6 +378,24 @@ func (w *Wrapper) ChangeMode() {
 	}
 
 	w.Redraw()
+
+	// LastRoundTable's column count was seeded at startup before its
+	// inner rect had real dimensions (it wasn't visible yet). Now that
+	// it's about to be drawn, recompute against the real width so the
+	// validator grid actually fills the pane.
+	if w.Mode == ModeLastRound {
+		_, _, width, _ := w.LastRoundTable.GetInnerRect()
+		if width > 0 {
+			columns := width / 50
+			if columns < 1 {
+				columns = 1
+			}
+			// Same as the startup hook: keep w.ColumnsCount in sync so
+			// m/l adjust from here, not from a stale value.
+			w.ColumnsCount = columns
+			w.LastRoundTableData.SetColumnsCount(columns)
+		}
+	}
 }
 
 func (w *Wrapper) Redraw() {
@@ -418,7 +474,7 @@ func (w *Wrapper) Redraw() {
 	}
 }
 
-// cleanup ensures proper terminal state restoration
+// cleanup ensures proper terminal state restoration.
 func (w *Wrapper) cleanup() {
 	if w.App != nil {
 		// Stop the application gracefully
@@ -429,9 +485,22 @@ func (w *Wrapper) cleanup() {
 	w.restoreTerminal()
 }
 
-// restoreTerminal restores terminal state
+// restoreTerminal restores terminal state. Called after tview has
+// exited, on both happy-path shutdown and panic recovery.
 func (w *Wrapper) restoreTerminal() {
-	// Send terminal reset sequences to restore state
+	// Briefly re-init a tcell screen and tear it down cleanly. This
+	// undoes any leftover alternate-screen / cursor state from tview.
+	if screen, err := tcell.NewScreen(); err == nil && screen != nil {
+		if err := screen.Init(); err == nil {
+			screen.Clear()
+			screen.ShowCursor(0, 0)
+			screen.Sync()
+			screen.Fini()
+		}
+	}
+
+	// Belt and suspenders: raw escape sequences in case tcell couldn't
+	// re-init (e.g. stdin already closed).
 	fmt.Print("\033[?25h")   // Show cursor
 	fmt.Print("\033[0m")     // Reset colors
 	fmt.Print("\033[2J")     // Clear screen

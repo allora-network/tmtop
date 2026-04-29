@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -58,4 +59,10 @@ func WithRoute(method, path string, handler http.Handler) Option {
 
 func (s *Server) Serve() error {
 	return s.server.ListenAndServe()
+}
+
+// Shutdown asks the underlying http.Server to drain gracefully,
+// bounded by ctx.
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.server.Shutdown(ctx)
 }

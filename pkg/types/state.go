@@ -1,21 +1,30 @@
 package types
 
 import (
-	"fmt"
 	"maps"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
 
-	"main/pkg/utils"
-
 	butils "github.com/brynbellomy/go-utils"
 	cptypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	rpctypes "github.com/cometbft/cometbft/rpc/core/types"
 	ctypes "github.com/cometbft/cometbft/types"
 	"github.com/rs/zerolog"
 )
 
+// State is the central mutable store for everything tmtop renders.
+// All access is serialized through mu. Setters Lock; readers either
+// use accessor methods that RLock, or interact with already-concurrent
+// sub-structures (VotesByRound, ProposalsByRound) that have their own
+// internal synchronization.
+//
+// Fields are left exported because rendering touches many of them and
+// unexporting everything would be churn; discipline lives in the
+// accessor conventions below.
 type State struct {
+	mu     sync.RWMutex
 	logger zerolog.Logger
 
 	Height    int64
@@ -23,28 +32,23 @@ type State struct {
 	Step      int64
 	StartTime time.Time
 
-	// Unified validator collection
-	TMValidators TMValidators
+	TMValidators       TMValidators
+	validatorsByPeerID map[string]TMValidator
 
-	// Chain metadata
-	ChainValidators *ChainValidators
-	ChainInfo       *TendermintStatusResult
-	Upgrade         *Upgrade
-	BlockTime       time.Duration
-	NetInfo         *NetInfo
+	ChainInfo *rpctypes.ResultStatus
+	Upgrade   *Upgrade
+	BlockTime time.Duration
+	NetInfo   *NetInfo
 
-	// Vote and proposal tracking
+	// Vote and proposal tracking. These have their own internal
+	// mutexes so they can be accessed without holding State.mu.
 	VotesByRound     *RoundDataMap
 	ProposalsByRound *butils.SortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]]
 
-	// Simplified validator tracking
-	validatorsByPeerID map[string]TMValidator
-
-	// RPC management
+	// RPC management. Guarded by the main mu.
 	currentRPC string
 	knownRPCs  *butils.OrderedMap[string, RPC]
 	rpcPeers   *butils.OrderedMap[string, []Peer]
-	muRPCs     *sync.RWMutex
 
 	// Error tracking
 	ConsensusStateError  error
@@ -80,7 +84,6 @@ func NewState(firstRPC string, logger zerolog.Logger) *State {
 		Step:               0,
 		StartTime:          time.Now(),
 		TMValidators:       TMValidators{},
-		ChainValidators:    nil,
 		VotesByRound:       NewRoundDataMap(),
 		ProposalsByRound:   butils.NewSortedMap[int64, *butils.SortedMap[int32, butils.Set[string]]](),
 		BlockTime:          0,
@@ -88,31 +91,12 @@ func NewState(firstRPC string, logger zerolog.Logger) *State {
 		currentRPC:         firstRPC,
 		knownRPCs:          butils.NewOrderedMap[string, RPC](),
 		rpcPeers:           butils.NewOrderedMap[string, []Peer](),
-		muRPCs:             &sync.RWMutex{},
 	}
 }
 
-func (s *State) Clear() {
-	s.Height = 0
-	s.Round = 0
-	s.Step = 0
-	s.TMValidators = TMValidators{}
-	s.ChainValidators = nil
-	s.ChainInfo = nil
-	s.StartTime = time.Now()
-	s.Upgrade = nil
-	s.BlockTime = time.Duration(0)
-	s.NetInfo = nil
-	s.ConsensusStateError = nil
-	s.ValidatorsError = nil
-	s.ChainValidatorsError = nil
-	s.UpgradePlanError = nil
-	s.ChainInfoError = nil
-}
-
 func (s *State) CurrentRPC() RPC {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	rpc, ok := s.knownRPCs.Get(s.currentRPC)
 	if !ok {
@@ -122,60 +106,60 @@ func (s *State) CurrentRPC() RPC {
 }
 
 func (s *State) SetCurrentRPCURL(rpcURL string) {
-	s.muRPCs.Lock()
-	defer s.muRPCs.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.currentRPC = rpcURL
 }
 
 func (s *State) KnownRPCByURL(url string) (RPC, bool) {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	rpc, ok := s.knownRPCs.Get(url)
 	return rpc, ok
 }
 
 func (s *State) KnownRPCs() *butils.OrderedMap[string, RPC] {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return s.knownRPCs.Copy()
 }
 
 func (s *State) AddKnownRPC(rpc RPC) {
-	s.muRPCs.Lock()
-	defer s.muRPCs.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.knownRPCs.Set(rpc.URL, rpc)
 }
 
 func (s *State) IsKnownRPC(rpcURL string) bool {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	_, ok := s.knownRPCs.Get(rpcURL)
 	return ok
 }
 
 func (s *State) RPCAtIndex(index int) (RPC, bool) {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	_, rpc, ok := s.knownRPCs.GetByIndex(index)
 	return rpc, ok
 }
 
 func (s *State) AddRPCPeers(rpcURL string, peers []Peer) {
-	s.muRPCs.Lock()
-	defer s.muRPCs.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.rpcPeers.Set(rpcURL, peers)
 }
 
 func (s *State) RPCPeers(rpcURL string) []Peer {
-	s.muRPCs.RLock()
-	defer s.muRPCs.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	peers, _ := s.rpcPeers.Get(rpcURL)
 	return peers
@@ -191,7 +175,7 @@ func (s *State) ValidatorsByPeerID() map[string]TMValidator {
 }
 
 func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
-	s.logger.Error().Msg("AddCometBFTEvents")
+	// VotesByRound carries its own mutex, so no State.mu needed here.
 	for _, event := range events {
 		switch x := event.(type) {
 		case ctypes.EventDataNewRound:
@@ -203,379 +187,176 @@ func (s *State) AddCometBFTEvents(events []ctypes.TMEventData) {
 	}
 }
 
-func (s *State) SetChainValidators(validators *ChainValidators) {
-	s.ChainValidators = validators
-}
-
-func (s *State) SetChainInfo(info *TendermintStatusResult) {
+func (s *State) SetChainInfo(info *rpctypes.ResultStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ChainInfo = info
 }
 
+func (s *State) GetChainInfo() *rpctypes.ResultStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ChainInfo
+}
+
 func (s *State) SetUpgrade(upgrade *Upgrade) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Upgrade = upgrade
 }
 
+func (s *State) GetUpgrade() *Upgrade {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Upgrade
+}
+
 func (s *State) SetBlockTime(blockTime time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.BlockTime = blockTime
 }
 
+func (s *State) GetBlockTime() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.BlockTime
+}
+
 func (s *State) SetNetInfo(info *NetInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.NetInfo = info
 }
 
+func (s *State) GetNetInfo() *NetInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.NetInfo
+}
+
 func (s *State) SetConsensusStateError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ConsensusStateError = err
 }
 
+func (s *State) GetConsensusStateError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ConsensusStateError
+}
+
 func (s *State) SetValidatorsError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ValidatorsError = err
 }
 
 func (s *State) SetUpgradePlanError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.UpgradePlanError = err
 }
 
+func (s *State) GetUpgradePlanError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.UpgradePlanError
+}
+
 func (s *State) SetChainInfoError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ChainInfoError = err
 }
 
-func (s *State) SerializeConsensus(timezone *time.Location) string {
-	if s.ConsensusStateError != nil {
-		return fmt.Sprintf(" consensus state error: %s", s.ConsensusStateError)
-	}
-
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf(" height=%d round=%d step=%d\n", s.Height, s.Round, s.Step))
-	sb.WriteString(fmt.Sprintf(
-		" block time: %s (%s)\n",
-		utils.ZeroOrPositiveDuration(utils.SerializeDuration(time.Since(s.StartTime))),
-		utils.SerializeTime(s.StartTime.In(timezone)),
-	))
-
-	sb.WriteString(fmt.Sprintf(
-		" prevote consensus (total/agreeing): %.2f / %.2f\n",
-		s.TMValidators.GetTotalVotingPowerPrevotedPercent(true),
-		s.TMValidators.GetTotalVotingPowerPrevotedPercent(false),
-	))
-	sb.WriteString(fmt.Sprintf(
-		" precommit consensus (total/agreeing): %.2f / %.2f\n",
-		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true),
-		s.TMValidators.GetTotalVotingPowerPrecommittedPercent(false),
-	))
-
-	sb.WriteString(fmt.Sprintf(" last updated at: %s\n", utils.SerializeTime(time.Now().In(timezone))))
-
-	return sb.String()
+func (s *State) GetChainInfoError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ChainInfoError
 }
 
-func (s *State) SerializeChainInfo(timezone *time.Location) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf(" rpc: %v\n", s.CurrentRPC().URL))
-	sb.WriteString(fmt.Sprintf(" (%v)\n\n", s.CurrentRPC().Moniker))
-
-	if s.ChainInfoError != nil {
-		sb.WriteString(fmt.Sprintf(" chain info fetch error: %s\n", s.ChainInfoError.Error()))
-	} else if s.ChainInfo != nil {
-		sb.WriteString(fmt.Sprintf(" chain name: %s\n", s.ChainInfo.NodeInfo.Network))
-		sb.WriteString(fmt.Sprintf(" tendermint version: v%s\n", s.ChainInfo.NodeInfo.Version))
-
-		if s.BlockTime != 0 {
-			sb.WriteString(fmt.Sprintf(" avg block time: %s\n", utils.SerializeDuration(s.BlockTime)))
-		}
-	}
-
-	if s.UpgradePlanError != nil {
-		sb.WriteString(fmt.Sprintf(" upgrade plan fetch error: %s\n", s.UpgradePlanError))
-	} else if s.Upgrade == nil {
-		sb.WriteString(" no chain upgrade scheduled\n")
-	} else {
-		sb.WriteString(s.SerializeUpgradeInfo(timezone))
-	}
-
-	return sb.String()
+// SetConsensusHeight records the current height/round/step/start time
+// in one locked write.
+func (s *State) SetConsensusHeight(height, round, step int64, startTime time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Height = height
+	s.Round = round
+	s.Step = step
+	s.StartTime = startTime
 }
 
-func (s *State) SerializeUpgradeInfo(timezone *time.Location) string {
-	var sb strings.Builder
-
-	if s.Upgrade.Height+1 == s.Height {
-		sb.WriteString(" upgrade in progress...\n")
-		return sb.String()
-	}
-
-	if s.Upgrade.Height+1 < s.Height {
-		sb.WriteString(fmt.Sprintf(
-			" chain upgrade %s applied at block %d\n",
-			s.Upgrade.Name,
-			s.Upgrade.Height,
-		))
-
-		sb.WriteString(fmt.Sprintf(
-			" blocks since upgrade: %d\n",
-			s.Height-s.Upgrade.Height,
-		))
-
-		if s.BlockTime == 0 {
-			return sb.String()
-		}
-
-		upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
-		sb.WriteString(fmt.Sprintf(
-			" time since upgrade: %s\n",
-			utils.SerializeDuration(time.Since(upgradeTime)),
-		))
-
-		sb.WriteString(fmt.Sprintf(" upgrade approximate time: %s\n", utils.SerializeTime(upgradeTime.In(timezone))))
-		return sb.String()
-	}
-
-	sb.WriteString(fmt.Sprintf(
-		" chain upgrade %s scheduled at block %d\n",
-		s.Upgrade.Name,
-		s.Upgrade.Height,
-	))
-
-	sb.WriteString(fmt.Sprintf(
-		" blocks till upgrade: %d\n",
-		s.Upgrade.Height-s.Height,
-	))
-
-	if s.BlockTime == 0 {
-		return sb.String()
-	}
-
-	upgradeTime := utils.CalculateTimeTillBlock(s.Height, s.Upgrade.Height, s.BlockTime)
-
-	sb.WriteString(fmt.Sprintf(
-		" time till upgrade: %s\n",
-		utils.SerializeDuration(time.Until(upgradeTime)),
-	))
-
-	sb.WriteString(fmt.Sprintf(" upgrade estimated time: %s\n", utils.SerializeTime(upgradeTime.In(timezone))))
-
-	return sb.String()
+// GetConsensusHeight returns the current height/round/step/start time.
+func (s *State) GetConsensusHeight() (height, round, step int64, startTime time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Height, s.Round, s.Step, s.StartTime
 }
 
-func (s *State) SerializeProgressbar(width int, height int, prefix string, progress int) string {
-	progressBar := ProgressBar{
-		Width:    width,
-		Height:   height,
-		Progress: progress,
-		Prefix:   prefix,
-	}
-
-	return progressBar.Serialize()
-}
-
-func (s *State) SerializePrevotesProgressbar(width int, height int) string {
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	prevotePercent := s.TMValidators.GetTotalVotingPowerPrevotedPercent(true)
-	prevotePercentFloat, _ := prevotePercent.Float64()
-	prevotePercentInt := int(prevotePercentFloat)
-
-	return s.SerializeProgressbar(width, height, "Prevotes: ", prevotePercentInt)
-}
-
-func (s *State) SerializePrecommitsProgressbar(width int, height int) string {
-	if len(s.TMValidators) == 0 {
-		return ""
-	}
-
-	precommitPercent := s.TMValidators.GetTotalVotingPowerPrecommittedPercent(true)
-	precommitPercentFloat, _ := precommitPercent.Float64()
-	precommitPercentInt := int(precommitPercentFloat)
-
-	return s.SerializeProgressbar(width, height, "Precommits: ", precommitPercentInt)
-}
-
-// TMValidator-based methods
-
-// GetTMValidators returns the unified validator collection
+// GetTMValidators returns the unified validator collection.
 func (s *State) GetTMValidators() TMValidators {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.TMValidators
 }
 
-// SetTMValidators sets the unified validator collection
+// SetTMValidators sets the unified validator collection.
 func (s *State) SetTMValidators(validators TMValidators) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.TMValidators = validators
 }
 
-// UpdateTMValidatorsWithRoundVotes updates current round vote state for all validators
-func (s *State) UpdateTMValidatorsWithRoundVotes(height int64, round int32) {
-	for i := range s.TMValidators {
-		validator := &s.TMValidators[i]
+// GetTotalVotingPowerPrevotedPercent calculates percentage using RoundDataMap.
+func (s *State) GetTotalVotingPowerPrevotedPercent(countDisagreeing bool) *big.Float {
+	s.mu.RLock()
+	validators := s.TMValidators
+	height, round := s.Height, int32(s.Round)
+	s.mu.RUnlock()
+	return votingPowerPercent(validators, s.VotesByRound, height, round, cptypes.PrevoteType, countDisagreeing)
+}
 
-		// Create current round vote state from VotesByRound data
-		roundVoteState := &RoundVoteState{
-			Address:    validator.GetDisplayAddress(),
-			Prevote:    s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrevoteType),
-			Precommit:  s.VotesByRound.GetVote(height, round, validator.GetDisplayAddress(), cptypes.PrecommitType),
-			IsProposer: s.VotesByRound.GetProposers(height, round).Has(validator.GetDisplayAddress()),
-		}
+// GetTotalVotingPowerPrecommittedPercent calculates percentage using RoundDataMap.
+func (s *State) GetTotalVotingPowerPrecommittedPercent(countDisagreeing bool) *big.Float {
+	s.mu.RLock()
+	validators := s.TMValidators
+	height, round := s.Height, int32(s.Round)
+	s.mu.RUnlock()
+	return votingPowerPercent(validators, s.VotesByRound, height, round, cptypes.PrecommitType, countDisagreeing)
+}
 
-		validator.CurrentRoundVote = roundVoteState
+func votingPowerPercent(
+	validators TMValidators,
+	votes *RoundDataMap,
+	height int64,
+	round int32,
+	msgType cptypes.SignedMsgType,
+	countDisagreeing bool,
+) *big.Float {
+	if len(validators) == 0 {
+		return big.NewFloat(0)
 	}
-}
 
-// SyncTMValidatorsWithChainValidators updates TMValidators with chain validator metadata
-func (s *State) SyncTMValidatorsWithChainValidators() {
-	if s.ChainValidators == nil {
-		return
-	}
+	voted := big.NewInt(0)
+	totalVP := big.NewInt(0)
 
-	chainValidatorsMap := s.ChainValidators.ToMap()
-	for i := range s.TMValidators {
-		validator := &s.TMValidators[i]
-		if chainValidator, ok := chainValidatorsMap[validator.GetDisplayAddress()]; ok {
-			validator.ChainValidator = &chainValidator
-		}
-	}
-}
+	for _, validator := range validators {
+		totalVP = totalVP.Add(totalVP, big.NewInt(validator.CometValidator.VotingPower))
 
-type RoundDataMap struct {
-	mu      *sync.RWMutex
-	heights *butils.SortedMap[int64, *butils.SortedMap[int32, *RoundData]]
-}
-
-type RoundData struct {
-	Proposers butils.Set[string]
-	Votes     map[string]map[cptypes.SignedMsgType]ctypes.BlockID
-}
-
-func NewRoundDataMap() *RoundDataMap {
-	return &RoundDataMap{
-		mu:      &sync.RWMutex{},
-		heights: butils.NewSortedMap[int64, *butils.SortedMap[int32, *RoundData]](),
-	}
-}
-
-type HeightAndRound struct {
-	Height int64
-	Round  int32
-}
-
-func (v *RoundDataMap) Iter() func(yield func(HeightAndRound, *RoundData) bool) {
-	return func(yield func(hr HeightAndRound, rd *RoundData) bool) {
-		v.mu.RLock()
-		defer v.mu.RUnlock()
-
-		for height, heightMap := range v.heights.Iter() {
-			for round, roundData := range heightMap.Iter() {
-				if !yield(HeightAndRound{height, round}, roundData) {
-					return
-				}
-			}
+		state := votes.GetVote(height, round, validator.GetDisplayAddress(), msgType)
+		if state == VoteStateForBlock || (countDisagreeing && state == VoteStateNil) {
+			voted = voted.Add(voted, big.NewInt(validator.CometValidator.VotingPower))
 		}
 	}
-}
 
-func (v *RoundDataMap) ReverseIter() func(yield func(HeightAndRound, *RoundData) bool) {
-	return func(yield func(hr HeightAndRound, rd *RoundData) bool) {
-		v.mu.RLock()
-		defer v.mu.RUnlock()
-
-		for height, heightMap := range v.heights.ReverseIter() {
-			for round, roundData := range heightMap.ReverseIter() {
-				if !yield(HeightAndRound{height, round}, roundData) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func (v *RoundDataMap) AddProposer(height int64, round int32, proposer string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	roundData := v.upsertRoundData(height, round)
-	roundData.Proposers.Add(proposer)
-}
-
-func (v *RoundDataMap) GetProposers(height int64, round int32) butils.Set[string] {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	roundMap, ok := v.heights.Get(height)
-	if !ok {
-		return nil
+	if totalVP.Cmp(big.NewInt(0)) == 0 {
+		return big.NewFloat(0)
 	}
 
-	roundData, ok := roundMap.Get(round)
-	if !ok {
-		return nil
-	}
-
-	return roundData.Proposers.Copy()
-}
-
-func (v *RoundDataMap) AddVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType, blockID ctypes.BlockID) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	roundData := v.upsertRoundData(height, round)
-
-	votesMap, ok := roundData.Votes[validator]
-	if !ok {
-		votesMap = map[cptypes.SignedMsgType]ctypes.BlockID{}
-		roundData.Votes[validator] = votesMap
-	}
-
-	votesMap[msgType] = blockID
-}
-
-func (v *RoundDataMap) GetVote(height int64, round int32, validator string, msgType cptypes.SignedMsgType) VoteState {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	roundMap, ok := v.heights.Get(height)
-	if !ok {
-		return VoteStateNone
-	}
-
-	roundData, ok := roundMap.Get(round)
-	if !ok {
-		return VoteStateNone
-	}
-
-	votesMap, ok := roundData.Votes[validator]
-	if !ok {
-		return VoteStateNone
-	}
-
-	blockID, ok := votesMap[msgType]
-	if !ok {
-		return VoteStateNone
-	} else if blockID.IsZero() {
-		return VoteStateNil
-	}
-	return VoteStateForBlock
-}
-
-func (v *RoundDataMap) upsertRoundData(height int64, round int32) *RoundData {
-	roundMap, ok := v.heights.Get(height)
-	if !ok {
-		roundMap = butils.NewSortedMap[int32, *RoundData]()
-		v.heights.Insert(height, roundMap)
-	}
-
-	roundData, ok := roundMap.Get(round)
-	if !ok {
-		roundData = &RoundData{
-			Proposers: butils.NewSet[string](),
-			Votes:     make(map[string]map[cptypes.SignedMsgType]ctypes.BlockID),
-		}
-		roundMap.Insert(round, roundData)
-	}
-
-	return roundData
+	percent := big.NewFloat(0).SetInt(voted)
+	percent = percent.Quo(percent, big.NewFloat(0).SetInt(totalVP))
+	percent = percent.Mul(percent, big.NewFloat(100))
+	return percent
 }

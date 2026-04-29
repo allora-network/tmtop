@@ -74,11 +74,11 @@ export type Conn = {
     from: string
     to: string
     connectionStatus: {
-        send_monitor: {
-            avg_rate: number
+        SendMonitor: {
+            AvgRate: number
         }
-        recv_monitor: {
-            avg_rate: number
+        RecvMonitor: {
+            AvgRate: number
         }
     }
 }

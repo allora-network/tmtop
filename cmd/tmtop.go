@@ -1,20 +1,23 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
 	"main/pkg"
 	configPkg "main/pkg/config"
 	"main/pkg/logger"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var (
-	version = "unknown"
-)
+var version = "unknown"
 
 func Execute(inputConfig configPkg.InputConfig, args []string, configFile string) {
 	// Load configuration from file if specified
@@ -35,11 +38,27 @@ func Execute(inputConfig configPkg.InputConfig, args []string, configFile string
 	}
 
 	app := pkg.NewApp(config, version)
+
+	// Trigger a graceful shutdown on SIGINT/SIGTERM. When tview owns
+	// the terminal the user will typically quit with 'q' or Ctrl+C
+	// (tview catches Ctrl+C itself), so this is mostly for kill
+	// signals from outside.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = app.Stop(ctx)
+	}()
+
 	app.Start()
 }
 
-// loadConfigFile loads configuration from file using viper
+// loadConfigFile loads configuration from file using viper.
 func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
+	fmt.Println("Loading config file:", configFile)
+
 	v := viper.New()
 
 	// Set config file path
@@ -50,14 +69,14 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 		// Use default locations
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return err
+			return fmt.Errorf("locating user home directory: %w", err)
 		}
-		
+
 		configDir := filepath.Join(homeDir, ".config", "tmtop")
 		v.SetConfigName("config")
 		v.SetConfigType("toml")
-		v.AddConfigPath(configDir)      // ~/.config/tmtop/
-		v.AddConfigPath(".")            // current directory
+		v.AddConfigPath(configDir) // ~/.config/tmtop/
+		v.AddConfigPath(".")       // current directory
 	}
 
 	// Set environment variable prefix for automatic env binding
@@ -83,13 +102,19 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	v.BindEnv("timezone", "TMTOP_TIMEZONE")
 	v.BindEnv("with-topology-api", "TMTOP_WITH_TOPOLOGY_API")
 	v.BindEnv("topology-listen-addr", "TMTOP_TOPOLOGY_LISTEN_ADDR")
+	v.BindEnv("database-path", "TMTOP_DATABASE_PATH")
+	v.BindEnv("max-retain-blocks", "TMTOP_MAX_RETAIN_BLOCKS")
+	v.BindEnv("max-retain-days", "TMTOP_MAX_RETAIN_DAYS")
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {
 		// Config file not found is acceptable - CLI flags/defaults will be used
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return err
+			return fmt.Errorf("reading config file %s: %w", v.ConfigFileUsed(), err)
 		}
+	}
+	if used := v.ConfigFileUsed(); used != "" {
+		fmt.Println("Loaded config file:", used)
 	}
 
 	// Map viper values to config struct (only if they exist and are not zero values)
@@ -147,6 +172,15 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	if v.IsSet("topology-listen-addr") {
 		config.TopologyListenAddr = v.GetString("topology-listen-addr")
 	}
+	if v.IsSet("database-path") {
+		config.DatabasePath = v.GetString("database-path")
+	}
+	if v.IsSet("max-retain-blocks") {
+		config.MaxRetainBlocks = v.GetInt64("max-retain-blocks")
+	}
+	if v.IsSet("max-retain-days") {
+		config.MaxRetainDays = v.GetInt("max-retain-days")
+	}
 
 	return nil
 }
@@ -186,6 +220,15 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&config.Timezone, "timezone", "", "Timezone to display dates in")
 	rootCmd.PersistentFlags().BoolVar(&config.WithTopologyAPI, "with-topology-api", false, "Enable topology API")
 	rootCmd.PersistentFlags().StringVar(&config.TopologyListenAddr, "topology-listen-addr", "0.0.0.0:8080", "The address on which to serve topology API")
+	rootCmd.PersistentFlags().StringVar(&config.DatabasePath, "database-path", "", "Path to SQLite database file (default: ~/.config/tmtop/tmtop.db)")
+	rootCmd.PersistentFlags().Int64Var(&config.MaxRetainBlocks, "max-retain-blocks", 10000, "Maximum number of blocks to retain in database")
+	rootCmd.PersistentFlags().IntVar(&config.MaxRetainDays, "max-retain-days", 7, "Maximum number of days to retain data (alternative to max-retain-blocks)")
+
+	// Analytics flags
+	rootCmd.PersistentFlags().BoolVar(&config.AnalyticsMode, "analytics", false, "Enable analytics mode (requires database)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsValidator, "analytics-validator", "", "Validator address for analytics (required in analytics mode)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsTimeWindow, "analytics-time-window", "24h", "Time window for analytics (Go duration: 30m, 1h, 24h, 168h, etc.)")
+	rootCmd.PersistentFlags().StringVar(&config.AnalyticsCommand, "analytics-command", "performance", "Analytics command to run (performance, rankings, timeseries, debug, diagnose, search)")
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.GetDefaultLogger().Fatal().Err(err).Msg("Could not start application")

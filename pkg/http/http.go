@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -25,6 +27,19 @@ func NewClient(logger zerolog.Logger, invoker, host string) *Client {
 	}
 }
 
+func (c *Client) join(host, rest string) string {
+	base, _ := url.Parse(host)
+	ref, _ := url.Parse(rest)
+
+	base.Path = path.Join(base.Path, ref.Path)
+	// Preserve query and fragment from the relative URL — without
+	// this, /abci_query?path=...&data=... loses its payload and
+	// /validators?page=N silently falls back to page 1.
+	base.RawQuery = ref.RawQuery
+	base.Fragment = ref.Fragment
+	return base.String()
+}
+
 func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	var transport http.RoundTripper
 
@@ -38,7 +53,7 @@ func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	client := &http.Client{Timeout: 300 * time.Second, Transport: transport}
 	start := time.Now()
 
-	fullURL := fmt.Sprintf("%s%s", c.Host, relativeURL)
+	fullURL := c.join(c.Host, relativeURL)
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -60,33 +75,36 @@ func (c *Client) GetInternal(relativeURL string) (io.ReadCloser, error) {
 	return res.Body, nil
 }
 
-func (c *Client) Get(relativeURL string, target interface{}) error {
+func (c *Client) Get(relativeURL string, target any) error {
+	fullURL := c.join(c.Host, relativeURL)
+
 	body, err := c.GetInternal(relativeURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("GET %s: %w", fullURL, err)
 	}
+	defer func() { _ = body.Close() }()
 
 	if err := json.NewDecoder(body).Decode(target); err != nil {
-		return err
+		return fmt.Errorf("decoding JSON from %s: %w", fullURL, err)
 	}
-
-	return body.Close()
+	return nil
 }
 
 func (c *Client) GetPlain(relativeURL string) ([]byte, error) {
-	body, err := c.GetInternal(relativeURL)
+	fullURL := c.join(c.Host, relativeURL)
 
+	body, err := c.GetInternal(relativeURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GET %s: %w", fullURL, err)
 	}
 
 	bytes, err := io.ReadAll(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading body from %s: %w", fullURL, err)
 	}
 
 	if err := body.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("closing body from %s: %w", fullURL, err)
 	}
 
 	return bytes, nil

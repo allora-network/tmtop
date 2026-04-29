@@ -2,63 +2,53 @@ package fetcher
 
 import (
 	"fmt"
-	configPkg "main/pkg/config"
+
+	"main/pkg/config"
 	"main/pkg/http"
 	"main/pkg/types"
-
-	sdkTypes "github.com/cosmos/cosmos-sdk/types"
 
 	upgradeTypes "cosmossdk.io/x/upgrade/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codecTypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/std"
+	sdkTypes "github.com/cosmos/cosmos-sdk/types"
 	stakingTypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/rs/zerolog"
 )
 
-type CosmosLcdDataFetcher struct {
-	Config *configPkg.Config
-	Logger zerolog.Logger
-	Client *http.Client
-
-	Registry    codecTypes.InterfaceRegistry
-	ParseCodec  *codec.ProtoCodec
+type CosmosLCDDataFetcher struct {
+	client      *http.Client
+	parseCodec  *codec.ProtoCodec
 	LegacyAmino *codec.LegacyAmino
 }
 
-func NewCosmosLcdDataFetcher(config *configPkg.Config, logger zerolog.Logger) *CosmosLcdDataFetcher {
+var _ cosmosRPCFetcher = (*CosmosLCDDataFetcher)(nil)
+
+func NewCosmosLCDDataFetcher(config *config.Config, logger zerolog.Logger) *CosmosLCDDataFetcher {
 	interfaceRegistry := codecTypes.NewInterfaceRegistry()
 	std.RegisterInterfaces(interfaceRegistry)
-	parseCodec := codec.NewProtoCodec(interfaceRegistry)
 
-	return &CosmosLcdDataFetcher{
-		Config:     config,
-		Logger:     logger.With().Str("component", "cosmos_lcd_data_fetcher").Logger(),
-		Client:     http.NewClient(logger, "cosmos_lcd_data_fetcher", config.LCDHost),
-		Registry:   interfaceRegistry,
-		ParseCodec: parseCodec,
+	return &CosmosLCDDataFetcher{
+		client:     http.NewClient(logger, "cosmos_lcd_data_fetcher", config.LCDHost),
+		parseCodec: codec.NewProtoCodec(interfaceRegistry),
 	}
 }
 
-func (f *CosmosLcdDataFetcher) GetValidators() (*types.ChainValidators, error) {
-	bytes, err := f.Client.GetPlain(
-		"/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=1000",
-	)
-
+func (f *CosmosLCDDataFetcher) GetValidators() (types.CosmosValidators, error) {
+	bytes, err := f.client.GetPlain("/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=1000")
 	if err != nil {
 		return nil, err
 	}
 
 	var validatorsResponse stakingTypes.QueryValidatorsResponse
-
-	if err := f.ParseCodec.UnmarshalJSON(bytes, &validatorsResponse); err != nil {
+	if err := f.parseCodec.UnmarshalJSON(bytes, &validatorsResponse); err != nil {
 		return nil, err
 	}
 
-	validators := make(types.ChainValidators, len(validatorsResponse.Validators))
+	validators := make(types.CosmosValidators, len(validatorsResponse.Validators))
 
-	for index, validator := range validatorsResponse.Validators {
-		if err := validator.UnpackInterfaces(f.ParseCodec); err != nil {
+	for i, validator := range validatorsResponse.Validators {
+		if err := validator.UnpackInterfaces(f.parseCodec); err != nil {
 			return nil, err
 		}
 
@@ -67,26 +57,34 @@ func (f *CosmosLcdDataFetcher) GetValidators() (*types.ChainValidators, error) {
 			return nil, err
 		}
 
-		validators[index] = types.ChainValidator{
-			Moniker:    validator.Description.Moniker,
-			Address:    fmt.Sprintf("%X", addr),
-			RawAddress: sdkTypes.ConsAddress(addr).String(),
+		consPubKey, err := validator.ConsPubKey()
+		if err != nil {
+			return nil, fmt.Errorf("getting consensus pubkey: %w", err)
+		}
+
+		cometConsPubKey, err := validator.CmtConsPublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("getting comet consensus pubkey: %w", err)
+		}
+
+		validators[i] = types.CosmosValidator{
+			Moniker:              validator.GetMoniker(),
+			OperatorAddress:      validator.GetOperator(),
+			ConsensusAddress:     sdkTypes.ConsAddress(addr).String(),
+			ConsensusPubkey:      consPubKey,
+			CometConsensusPubkey: cometConsPubKey,
 		}
 	}
 
-	return &validators, nil
+	return validators, nil
 }
 
-func (f *CosmosLcdDataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
+func (f *CosmosLCDDataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
 	var response upgradeTypes.QueryCurrentPlanResponse
-	if err := f.Client.Get(
-		"/cosmos/upgrade/v1beta1/current_plan",
-		&response,
-	); err != nil {
+	err := f.client.Get("/cosmos/upgrade/v1beta1/current_plan", &response)
+	if err != nil {
 		return nil, err
-	}
-
-	if response.Plan == nil {
+	} else if response.Plan == nil {
 		return nil, nil
 	}
 
@@ -94,8 +92,4 @@ func (f *CosmosLcdDataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
 		Name:   response.Plan.Name,
 		Height: response.Plan.Height,
 	}, nil
-}
-
-func (f *CosmosLcdDataFetcher) GetNetInfo(host string) (*types.NetInfo, error) {
-	return nil, nil
 }

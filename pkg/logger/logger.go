@@ -2,9 +2,11 @@ package logger
 
 import (
 	"io"
-	configPkg "main/pkg/config"
 	"os"
 
+	configPkg "main/pkg/config"
+
+	bsync "github.com/brynbellomy/go-utils"
 	"github.com/rs/zerolog"
 )
 
@@ -13,19 +15,22 @@ func GetDefaultLogger() *zerolog.Logger {
 	return &log
 }
 
+// Writer forwards zerolog output to a mailbox (non-blocking, so a
+// slow log consumer can never freeze the app) and optionally tees to
+// a debug file.
 type Writer struct {
 	io.Writer
-	DebugFile  *os.File
-	LogChannel chan string
+	DebugFile *os.File
+	Mailbox   *bsync.Mailbox[string]
 }
 
-func NewWriter(logChannel chan string, config *configPkg.Config) Writer {
+func NewWriter(mb *bsync.Mailbox[string], config *configPkg.Config) Writer {
 	writer := Writer{
-		LogChannel: logChannel,
+		Mailbox: mb,
 	}
 
 	if config.DebugFile != "" {
-		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0755)
+		debugFile, err := os.OpenFile(config.DebugFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 		if err != nil {
 			panic(err)
 		}
@@ -37,7 +42,7 @@ func NewWriter(logChannel chan string, config *configPkg.Config) Writer {
 }
 
 func (w Writer) Write(msg []byte) (int, error) {
-	w.LogChannel <- string(msg)
+	w.Mailbox.Deliver(string(msg))
 
 	if w.DebugFile != nil {
 		if _, err := w.DebugFile.Write(msg); err != nil {
@@ -52,9 +57,9 @@ func (w Writer) Write(msg []byte) (int, error) {
 	return len(msg), nil
 }
 
-func GetLogger(logChannel chan string, config *configPkg.Config) *zerolog.Logger {
+func GetLogger(mb *bsync.Mailbox[string], config *configPkg.Config) *zerolog.Logger {
 	writer := zerolog.ConsoleWriter{
-		Out:     NewWriter(logChannel, config),
+		Out:     NewWriter(mb, config),
 		NoColor: true,
 	}
 	log := zerolog.New(writer).With().Timestamp().Logger()

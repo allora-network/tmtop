@@ -1,26 +1,29 @@
 package pkg
 
 import (
-	"fmt"
-	"math/big"
+	"context"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"main/pkg/analytics"
 	configPkg "main/pkg/config"
+	"main/pkg/crawler"
+	"main/pkg/db"
 	"main/pkg/display"
 	"main/pkg/fetcher"
 	tmhttp "main/pkg/http"
 	loggerPkg "main/pkg/logger"
+	"main/pkg/refresher"
 	"main/pkg/topology"
 	"main/pkg/types"
-	"main/pkg/utils"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	butils "github.com/brynbellomy/go-utils"
-	"github.com/cometbft/cometbft/crypto"
-	"github.com/cometbft/cometbft/crypto/ed25519"
+	cnstypes "github.com/cometbft/cometbft/consensus/types"
 	ctypes "github.com/cometbft/cometbft/types"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog"
 )
 
@@ -28,293 +31,275 @@ type App struct {
 	Logger         zerolog.Logger
 	Version        string
 	Config         *configPkg.Config
-	DisplayWrapper *display.Wrapper
+	DisplayWrapper display.Display
 	State          *types.State
-	LogChannel     chan string
+	mbLogs         *butils.Mailbox[string]
 
-	// Direct fetcher instances instead of Aggregator
-	TendermintClient  *fetcher.TendermintRPC
-	DataFetcher       fetcher.DataFetcher
-	CometRPCWebsocket *fetcher.CometRPCWebsocket
+	DB             *db.DB
+	ConsensusStore db.ConsensusStorer
 
-	mbRPCURLs        *butils.Mailbox[string]
-	rpcURLsLastFetch map[string]time.Time
+	DataFetcher fetcher.Fetcher
 
-	PauseChannel chan bool
-	IsPaused     bool
+	topologyServer *tmhttp.Server
 
-	// Terminal state management
-	cleanupFuncs []func()
+	IsPaused atomic.Bool
+
+	chStop    chan struct{}
+	closeOnce sync.Once
+	wgDone    *sync.WaitGroup
 }
 
 func NewApp(config *configPkg.Config, version string) *App {
-	logChannel := make(chan string, 1000)
-	pauseChannel := make(chan bool)
+	mbLogs := butils.NewMailbox[string](1000)
 
-	logger := loggerPkg.GetLogger(logChannel, config).
+	logger := loggerPkg.GetLogger(mbLogs, config).
 		With().
 		Str("component", "app_manager").
 		Logger()
 
 	state := types.NewState(config.RPCHost, logger)
 
-	return &App{
-		Logger:            logger,
-		Version:           version,
-		Config:            config,
-		DisplayWrapper:    display.NewWrapper(config, state, logger, pauseChannel, version),
-		State:             state,
-		LogChannel:        logChannel,
-		TendermintClient:  fetcher.NewTendermintRPC(config, state, logger),
-		DataFetcher:       fetcher.GetDataFetcher(config, state, logger),
-		CometRPCWebsocket: fetcher.NewCometRPCWebsocket(config.RPCHost, logger),
-		mbRPCURLs:         butils.NewMailbox[string](1000),
-		rpcURLsLastFetch:  make(map[string]time.Time),
-		PauseChannel:      pauseChannel,
-		IsPaused:          false,
-		cleanupFuncs:      make([]func(), 0),
+	// Initialize database if configured. When disabled, ConsensusStore
+	// is a no-op so the rest of the app never needs to nil-check.
+	var database *db.DB
+	var consensusStore db.ConsensusStorer = db.NopConsensusStore{}
+
+	if config.MaxRetainBlocks > 0 || config.MaxRetainDays > 0 {
+		dbPath := config.DatabasePath
+		if dbPath == "" {
+			// Use default path: ~/.config/tmtop/tmtop.db
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				logger.Warn().Err(err).Msg("Could not get user home directory, using current directory for database")
+				dbPath = "tmtop.db"
+			} else {
+				dbPath = filepath.Join(homeDir, ".config", "tmtop", "tmtop.db")
+			}
+		}
+
+		dbConfig := db.Config{
+			DatabasePath:    dbPath,
+			MaxRetainBlocks: config.MaxRetainBlocks,
+			MaxRetainDays:   config.MaxRetainDays,
+		}
+
+		var err error
+		database, err = db.New(dbConfig)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("failed to initialize database")
+		}
+
+		consensusStore = db.NewConsensusStore(database, dbConfig, logger)
+		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
+
+	app := &App{
+		Logger:         logger,
+		Version:        version,
+		Config:         config,
+		State:          state,
+		mbLogs:         mbLogs,
+		DB:             database,
+		ConsensusStore: consensusStore,
+		DataFetcher:    fetcher.NewDataFetcher(config, state, logger),
+		chStop:         make(chan struct{}),
+		wgDone:         &sync.WaitGroup{},
+	}
+	// Display needs a pointer to the pause flag so its input handler
+	// can toggle it in-place.
+	app.DisplayWrapper = display.NewWrapper(config, state, logger, &app.IsPaused, version)
+	return app
 }
 
 func (a *App) Start() {
-	// Set up terminal cleanup on exit
-	defer a.restoreTerminal()
-
-	if a.Config.WithTopologyAPI {
-		go a.ServeTopology()
-		topology.LogChannel = a.LogChannel
+	// Check if analytics mode is enabled
+	if a.Config.AnalyticsMode {
+		analytics.Run(a.Config, a.DB, a.Logger)
+		return
 	}
 
-	go a.CrawlRPCURLs()
+	if a.Config.WithTopologyAPI {
+		// Construct the server synchronously here so a.topologyServer is
+		// safely visible to Stop() without a separate mutex; only the
+		// blocking Serve() call goes onto a goroutine.
+		a.topologyServer = tmhttp.NewServer(
+			a.Config.TopologyListenAddr,
+			topology.WithHTTPTopologyAPI(a.State),
+			topology.WithHTTPPeersAPI(a.State),
+			topology.WithHTTPDebugAPI(a.State),
+			topology.WithFrontendStaticAssets(),
+		)
+		a.spawn(a.ServeTopology)
+	}
 
-	go a.GoRefreshConsensus()
-	go a.GoRefreshValidators()
-	go a.GoRefreshChainInfo()
-	go a.GoRefreshUpgrade()
-	go a.GoRefreshBlockTime()
-	go a.GoRefreshNetInfo()
-	go a.SubscribeCometBFT()
-	go a.DisplayLogs()
-	go a.ListenForPause()
+	c := crawler.New(a.Config.RPCHost, a.DataFetcher, a.State, a.Logger, a.chStop)
+	a.spawn(c.Run)
 
-	a.DisplayWrapper.Start()
+	a.spawnRefresher("consensus", a.Config.RefreshRate, a.RefreshConsensus)
+	a.spawnRefresher("comet-node-info", a.Config.ChainInfoRefreshRate, a.RefreshCometNodeInfo)
+	a.spawnRefresher("upgrade", a.Config.UpgradeRefreshRate, a.RefreshUpgrade)
+	a.spawnRefresher("block-time", a.Config.BlockTimeRefreshRate, a.RefreshBlockTime)
+	a.spawnRefresher("net-info", a.Config.RefreshRate, a.RefreshNetInfo)
+
+	a.spawn(a.SubscribeCometBFT)
+	a.spawn(a.DisplayLogs)
+	a.spawn(a.databaseCleanupRoutine)
+
+	// Display blocks until the user quits.
+	if err := a.DisplayWrapper.Start(); err != nil {
+		a.Logger.Error().Err(err).Msg("display exited with error")
+	}
+
+	// User requested exit — shut everything else down.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.Stop(ctx); err != nil {
+		a.Logger.Error().Err(err).Msg("shutdown incomplete")
+	}
+}
+
+// spawn runs fn as a tracked goroutine. Every goroutine launched by
+// the App must go through this so Stop can wait on wgDone.
+func (a *App) spawn(fn func()) {
+	a.wgDone.Add(1)
+	go func() {
+		defer a.wgDone.Done()
+		fn()
+	}()
+}
+
+// spawnRefresher starts a named refresh loop. The loop runs refresh
+// immediately, then on each interval tick, exiting on chStop. Panic
+// recovery is the same as any other refresh goroutine via HandlePanic.
+func (a *App) spawnRefresher(name string, interval time.Duration, refresh func()) {
+	a.spawn(func() {
+		defer a.HandlePanic()
+		refresher.New(name, interval, refresh, a.chStop, a.Logger).Run()
+	})
+}
+
+// Stop signals all background goroutines to exit and waits for them,
+// bounded by ctx. Shutdown order: websocket/HTTP producers first (so
+// they stop writing State and DB), then the consensus store.
+func (a *App) Stop(ctx context.Context) error {
+	a.closeOnce.Do(func() {
+		close(a.chStop)
+	})
+
+	// Stop the websocket producer before we stop the consumer goroutines.
+	if err := a.DataFetcher.Close(ctx); err != nil {
+		a.Logger.Error().Err(err).Msg("DataFetcher close error")
+	}
+
+	// Stop the topology HTTP server if it's running.
+	if a.topologyServer != nil {
+		if err := a.topologyServer.Shutdown(ctx); err != nil {
+			a.Logger.Error().Err(err).Msg("topology server shutdown error")
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.wgDone.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		a.Logger.Error().Msg("shutdown timed out — some goroutines may still be running")
+	}
+
+	// Flush the consensus store last, after all writers have stopped.
+	if err := a.ConsensusStore.Close(); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to close consensus store")
+	}
+	return nil
 }
 
 func (a *App) ServeTopology() {
-	_ = tmhttp.NewServer(
-		a.Config.TopologyListenAddr,
-		topology.WithHTTPTopologyAPI(a.State),
-		topology.WithHTTPPeersAPI(a.State),
-		topology.WithHTTPDebugAPI(a.State),
-		topology.WithFrontendStaticAssets(),
-	).Serve()
-}
-
-func (a *App) CrawlRPCURLs() {
-	a.mbRPCURLs.Deliver(a.Config.RPCHost)
-	timer := time.NewTimer(15 * time.Second)
-
-	for {
-		select {
-		case <-a.mbRPCURLs.Notify():
-			var wg sync.WaitGroup
-			for _, url := range a.mbRPCURLs.RetrieveAll() {
-				if lastFetch, ok := a.rpcURLsLastFetch[url]; ok && time.Now().Sub(lastFetch) < 15*time.Second {
-					continue
-				}
-				a.rpcURLsLastFetch[url] = time.Now()
-
-				url := url
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					a.fetchRPCInfo(url)
-				}()
-			}
-			wg.Wait()
-
-		case <-timer.C:
-			for _, rpc := range a.State.KnownRPCs().Iter() {
-				if time.Since(a.rpcURLsLastFetch[rpc.URL]) >= 15*time.Second {
-					a.mbRPCURLs.Deliver(rpc.URL)
-				}
-			}
-		}
-
-	}
-}
-
-func (a *App) fetchRPCInfo(rpcURL string) {
-	netInfo, err := a.DataFetcher.GetNetInfo(rpcURL)
-	if err != nil {
-		a.LogChannel <- fmt.Sprintf("error getting /net_info from %s: %v", rpcURL, err)
-		return
-	}
-
-	status, err := a.TendermintClient.GetStatus(rpcURL)
-	if err != nil {
-		a.LogChannel <- fmt.Sprintf("error getting /status from %s: %v", rpcURL, err)
-		return
-	}
-
-	var rpc types.RPC
-	if known, ok := a.State.KnownRPCByURL(rpcURL); ok {
-		rpc = known
-	}
-	rpc.ID = status.Result.NodeInfo.ID
-	rpc.URL = rpcURL
-	rpc.Moniker = status.Result.NodeInfo.Moniker
-	rpc.ValidatorAddress = status.Result.ValidatorInfo.Address
-
-	if status.Result.ValidatorInfo.Address != "" && a.State.ChainValidators != nil {
-		for _, cv := range *a.State.ChainValidators {
-			if strings.ToLower(cv.Address) == strings.ToLower(rpc.ValidatorAddress) {
-				rpc.ValidatorMoniker = cv.Moniker
-				break
-			}
-		}
-	}
-
-	a.State.AddKnownRPC(rpc)
-
-	a.State.AddRPCPeers(rpcURL, netInfo.Peers)
-	for _, peer := range netInfo.Peers {
-		var peerRPC types.RPC
-		if known, ok := a.State.KnownRPCByURL(peer.URL()); ok {
-			peerRPC = known
-		}
-		peerRPC.ID = string(peer.NodeInfo.DefaultNodeID)
-		peerRPC.IP = peer.RemoteIP
-		peerRPC.URL = peer.URL()
-		peerRPC.Moniker = peer.NodeInfo.Moniker
-		a.State.AddKnownRPC(peerRPC)
-
-		a.mbRPCURLs.Deliver(peer.URL())
-	}
-}
-
-func (a *App) GoRefreshConsensus() {
-	defer a.HandlePanic()
-
-	a.RefreshConsensus()
-
-	ticker := time.NewTicker(a.Config.RefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshConsensus()
-		}
+	if err := a.topologyServer.Serve(); err != nil && err != http.ErrServerClosed {
+		a.Logger.Error().Err(err).Msg("topology server error")
 	}
 }
 
 func (a *App) RefreshConsensus() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
 	var wg sync.WaitGroup
-	var consensusError error
-	var validatorsError error
-	var validators []types.TendermintValidator
-	var consensus *types.ConsensusStateResponse
+	var consensus *cnstypes.RoundState
+	var vals []types.TMValidator
+	var consErr error
+	var valsErr error
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		consensus, consensusError = a.TendermintClient.GetConsensusState()
+		consensus, consErr = a.DataFetcher.GetConsensusState()
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		validators, validatorsError = a.TendermintClient.GetValidators()
+		vals, valsErr = a.DataFetcher.GetValidators()
 	}()
 
 	wg.Wait()
 
-	if consensusError != nil {
-		a.Logger.Error().Err(consensusError).Msg("Could not fetch consensus data")
-		a.State.SetConsensusStateError(consensusError)
+	if consErr != nil {
+		a.Logger.Error().Err(consErr).Msg("Could not fetch consensus data")
+		a.State.SetConsensusStateError(consErr)
 		a.DisplayWrapper.SetState(a.State)
 		return
 	}
 
-	if validatorsError != nil {
-		a.Logger.Error().Err(validatorsError).Msg("Could not fetch validators")
-		a.State.SetConsensusStateError(validatorsError)
+	if valsErr != nil {
+		a.Logger.Error().Err(valsErr).Msg("Could not fetch validators")
+		a.State.SetConsensusStateError(valsErr)
 		a.DisplayWrapper.SetState(a.State)
 		return
 	}
 
-	// Convert TendermintValidator data to TMValidators
-	tmValidators := a.convertToTMValidators(validators, consensus)
-	a.State.SetTMValidators(tmValidators)
+	a.State.SetTMValidators(vals)
 	a.State.SetConsensusStateError(nil)
+
+	if consensus != nil {
+		a.State.SetConsensusHeight(consensus.Height, int64(consensus.Round), int64(consensus.Step), consensus.StartTime)
+
+		// Seed the proposer for (height, round) directly from
+		// /consensus_state. NewRound websocket events only fire at
+		// round transitions, so without this seed the proposer-row
+		// highlight stays empty at startup and after reconnects.
+		if consensus.Validators != nil && consensus.Validators.Proposer != nil {
+			a.State.VotesByRound.AddProposer(
+				consensus.Height,
+				consensus.Round,
+				consensus.Validators.Proposer.Address.String(),
+			)
+		}
+
+		ctx := context.Background()
+		if err := a.ConsensusStore.StoreValidators(ctx, consensus.Height, vals); err != nil {
+			a.Logger.Error().Err(err).Int64("height", consensus.Height).Msg("Failed to persist validators to database")
+		}
+		for hr, roundData := range a.State.VotesByRound.Iter() {
+			if err := a.ConsensusStore.StoreRoundData(ctx, hr.Height, hr.Round, roundData, vals); err != nil {
+				a.Logger.Debug().Err(err).Int64("height", hr.Height).Int32("round", hr.Round).Msg("Failed to persist round data")
+			}
+		}
+	}
+
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshValidators() {
-	defer a.HandlePanic()
-
-	a.RefreshValidators()
-
-	ticker := time.NewTicker(a.Config.ValidatorsRefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshValidators()
-		}
-	}
-}
-
-func (a *App) RefreshValidators() {
-	if a.IsPaused {
+func (a *App) RefreshCometNodeInfo() {
+	if a.IsPaused.Load() {
 		return
 	}
 
-	chainValidators, err := a.DataFetcher.GetValidators()
-	if err != nil {
-		a.DisplayWrapper.SetState(a.State)
-		a.Logger.Error().Err(err).Msg("Error getting chain validators")
-		return
-	}
-
-	a.State.SetChainValidators(chainValidators)
-	a.DisplayWrapper.SetState(a.State)
-}
-
-func (a *App) GoRefreshChainInfo() {
-	defer a.HandlePanic()
-
-	a.RefreshChainInfo()
-
-	ticker := time.NewTicker(a.Config.ChainInfoRefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshChainInfo()
-		}
-	}
-}
-
-func (a *App) RefreshChainInfo() {
-	if a.IsPaused {
-		return
-	}
-
-	chainInfo, err := a.TendermintClient.GetStatus(a.State.CurrentRPC().URL)
+	nodeStatus, err := a.DataFetcher.GetCometNodeStatus(a.State.CurrentRPC().URL)
 	if err != nil {
 		a.Logger.Error().Err(err).Msg("Error getting chain info")
 		a.State.SetChainInfoError(err)
@@ -322,31 +307,13 @@ func (a *App) RefreshChainInfo() {
 		return
 	}
 
-	a.State.SetChainInfo(&chainInfo.Result)
+	a.State.SetChainInfo(nodeStatus)
 	a.State.SetChainInfoError(err)
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshUpgrade() {
-	defer a.HandlePanic()
-
-	a.RefreshUpgrade()
-
-	ticker := time.NewTicker(a.Config.UpgradeRefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshUpgrade()
-		}
-	}
-}
-
 func (a *App) RefreshUpgrade() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -374,30 +341,12 @@ func (a *App) RefreshUpgrade() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshBlockTime() {
-	defer a.HandlePanic()
-
-	a.RefreshBlockTime()
-
-	ticker := time.NewTicker(a.Config.BlockTimeRefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshBlockTime()
-		}
-	}
-}
-
 func (a *App) RefreshBlockTime() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
-	blockTime, err := a.TendermintClient.GetBlockTime()
+	blockTime, err := a.DataFetcher.GetBlockTime()
 	if err != nil {
 		a.Logger.Error().Err(err).Msg("Error getting block time")
 		return
@@ -407,26 +356,8 @@ func (a *App) RefreshBlockTime() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
-func (a *App) GoRefreshNetInfo() {
-	defer a.HandlePanic()
-
-	a.RefreshNetInfo()
-
-	ticker := time.NewTicker(a.Config.RefreshRate)
-	done := make(chan bool)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			a.RefreshNetInfo()
-		}
-	}
-}
-
 func (a *App) RefreshNetInfo() {
-	if a.IsPaused {
+	if a.IsPaused.Load() {
 		return
 	}
 
@@ -443,17 +374,27 @@ func (a *App) RefreshNetInfo() {
 func (a *App) SubscribeCometBFT() {
 	defer a.HandlePanic()
 
-	fmt.Println("connecting to websocket...")
+	a.Logger.Info().Msg("connecting to websocket")
 
 	mbEvents := butils.NewMailbox[ctypes.TMEventData](1000)
-	a.CometRPCWebsocket.Subscribe(mbEvents, "Vote")
-	a.CometRPCWebsocket.Subscribe(mbEvents, "NewRound")
+	a.DataFetcher.Subscribe(mbEvents, "Vote")
+	a.DataFetcher.Subscribe(mbEvents, "NewRound")
 
 	for {
 		select {
+		case <-a.chStop:
+			return
 		case <-mbEvents.Notify():
 			events := mbEvents.RetrieveAll()
 			a.State.AddCometBFTEvents(events)
+
+			if len(events) > 0 {
+				ctx := context.Background()
+				if err := a.ConsensusStore.StoreCometBFTEvents(ctx, events, a.State.GetTMValidators()); err != nil {
+					a.Logger.Error().Err(err).Msg("Failed to persist CometBFT events to database")
+				}
+			}
+
 			a.DisplayWrapper.SetState(a.State)
 		}
 	}
@@ -461,15 +402,14 @@ func (a *App) SubscribeCometBFT() {
 
 func (a *App) DisplayLogs() {
 	for {
-		logString := <-a.LogChannel
-		a.DisplayWrapper.DebugText(logString)
-	}
-}
-
-func (a *App) ListenForPause() {
-	for {
-		paused := <-a.PauseChannel
-		a.IsPaused = paused
+		select {
+		case <-a.chStop:
+			return
+		case <-a.mbLogs.Notify():
+			for _, line := range a.mbLogs.RetrieveAll() {
+				a.DisplayWrapper.DebugText(line)
+			}
+		}
 	}
 }
 
@@ -481,130 +421,40 @@ func (a *App) HandlePanic() {
 	}
 }
 
-// shutdown performs graceful shutdown with terminal cleanup
+// shutdown is called from HandlePanic. Best-effort cleanup before
+// the re-panic takes the process down. Display.Stop already restores
+// the terminal; we just add a last-resort second call in case Stop
+// fails.
 func (a *App) shutdown() {
-	// Stop the tview application first
-	if a.DisplayWrapper != nil && a.DisplayWrapper.App != nil {
-		a.DisplayWrapper.App.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if a.DisplayWrapper != nil {
+		_ = a.DisplayWrapper.Stop(ctx)
 	}
-
-	// Run all registered cleanup functions
-	a.restoreTerminal()
+	_ = a.Stop(ctx)
 }
 
-// restoreTerminal restores terminal state and cleans up
-func (a *App) restoreTerminal() {
-	// Get the default screen to ensure proper cleanup
-	screen, err := tcell.NewScreen()
-	if err == nil && screen != nil {
-		// Initialize screen briefly to ensure proper state
-		if err := screen.Init(); err == nil {
-			// Clear the screen and restore cursor
-			screen.Clear()
-			screen.ShowCursor(0, 0)
-			screen.Sync()
-			screen.Fini()
-		}
+// databaseCleanupRoutine runs periodic retention cleanup.
+func (a *App) databaseCleanupRoutine() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	ctx := context.Background()
+	if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
 	}
 
-	// Send additional terminal reset sequences
-	fmt.Print("\033[?25h")   // Show cursor
-	fmt.Print("\033[0m")     // Reset colors
-	fmt.Print("\033[2J")     // Clear screen
-	fmt.Print("\033[H")      // Move cursor to top-left
-	fmt.Print("\033[?1049l") // Exit alternate screen buffer
-
-	// Run any additional cleanup functions
-	for _, cleanup := range a.cleanupFuncs {
-		cleanup()
-	}
-}
-
-// addCleanupFunc registers a function to be called during shutdown
-func (a *App) addCleanupFunc(fn func()) {
-	a.cleanupFuncs = append(a.cleanupFuncs, fn)
-}
-
-// convertToTMValidators converts TendermintValidator slice to TMValidators
-func (a *App) convertToTMValidators(validators []types.TendermintValidator, consensus *types.ConsensusStateResponse) types.TMValidators {
-	tmValidators := make(types.TMValidators, 0, len(validators))
-	
-	// Calculate total voting power first
-	totalVotingPower := int64(0)
-	for _, validator := range validators {
-		votingPower, err := strconv.ParseInt(validator.VotingPower, 10, 64)
-		if err != nil {
-			a.Logger.Error().Err(err).Str("address", validator.Address).Msg("Failed to parse voting power")
-			continue
-		}
-		totalVotingPower += votingPower
-	}
-	
-	for i, validator := range validators {
-		// Convert TendermintValidator to CometBFT Validator
-		cometValidator, err := a.convertToCometBFTValidator(validator)
-		if err != nil {
-			a.Logger.Error().Err(err).Str("address", validator.Address).Msg("Failed to convert validator")
-			continue
-		}
-		
-		// Calculate voting power percentage
-		votingPowerPercent := big.NewFloat(0)
-		if totalVotingPower > 0 {
-			validatorPower := big.NewFloat(float64(cometValidator.VotingPower))
-			total := big.NewFloat(float64(totalVotingPower))
-			votingPowerPercent.Quo(validatorPower, total)
-			votingPowerPercent.Mul(votingPowerPercent, big.NewFloat(100))
-		}
-		
-		tmValidator := types.TMValidator{
-			Validator:          *cometValidator,
-			Index:              i,
-			VotingPowerPercent: votingPowerPercent,
-		}
-		
-		// Add chain validator info if available
-		if a.State.ChainValidators != nil {
-			for _, cv := range *a.State.ChainValidators {
-				if cv.Address == validator.Address {
-					tmValidator.ChainValidator = &cv
-					break
-				}
+	for {
+		select {
+		case <-a.chStop:
+			return
+		case <-ticker.C:
+			if err := a.ConsensusStore.CleanupOldData(ctx); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to cleanup old database data")
+			} else {
+				a.Logger.Debug().Msg("Database cleanup completed successfully")
 			}
 		}
-		
-		tmValidators = append(tmValidators, tmValidator)
 	}
-	
-	return tmValidators
 }
 
-// convertToCometBFTValidator converts a TendermintValidator to CometBFT Validator
-func (a *App) convertToCometBFTValidator(validator types.TendermintValidator) (*ctypes.Validator, error) {
-	// Parse voting power
-	votingPower, err := strconv.ParseInt(validator.VotingPower, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid voting power %s: %w", validator.VotingPower, err)
-	}
-	
-	// Parse public key - for now, create a simple ed25519 key
-	// This is a simplified approach since we primarily need the address and voting power for display
-	pubKeyBytes, err := utils.Base64ToBytes(validator.PubKey.PubKeyBase64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid public key %s: %w", validator.PubKey.PubKeyBase64, err)
-	}
-	
-	// Create ed25519 public key (most common type)
-	var pubKey crypto.PubKey
-	if len(pubKeyBytes) == 32 { // ed25519 key length
-		pubKey = ed25519.PubKey(pubKeyBytes)
-	} else {
-		// Fallback: create a minimal implementation that just handles address generation
-		return nil, fmt.Errorf("unsupported public key type or length: %d", len(pubKeyBytes))
-	}
-	
-	// Create CometBFT validator using the constructor
-	cometValidator := ctypes.NewValidator(pubKey, votingPower)
-	
-	return cometValidator, nil
-}
