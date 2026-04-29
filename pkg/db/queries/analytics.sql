@@ -74,26 +74,32 @@ HAVING COUNT(*) > 0
 ORDER BY consecutive_misses DESC;
 
 -- name: GetAllValidatorsSigningEfficiency :many
--- Get signing efficiency for all validators over a time window
+-- Get signing efficiency for all validators over a time window.
+-- The CTE collapses participation to one row per (validator, height) using
+-- EXISTS rather than LEFT JOIN votes — a validator with both a prevote and
+-- a precommit at the same height would otherwise appear twice and inflate
+-- both total_blocks and blocks_signed.
 WITH validator_participation AS (
-    SELECT 
+    SELECT
         vals.hex_address,
         vals.moniker,
         h.height,
-        CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END as participated
+        CASE WHEN EXISTS (
+            SELECT 1 FROM votes v
+            WHERE v.validator_hex_address = vals.hex_address AND v.height = h.height
+        ) THEN 1 ELSE 0 END as participated
     FROM validators vals
     CROSS JOIN heights h
-    LEFT JOIN votes v ON vals.hex_address = v.validator_hex_address AND h.height = v.height
     WHERE h.block_time >= ? AND h.block_time <= ?
 )
-SELECT 
+SELECT
     hex_address,
     moniker,
     COUNT(*) as total_blocks,
     SUM(participated) as blocks_signed,
     COUNT(*) - SUM(participated) as blocks_missed,
-    ROUND(100.0 * SUM(participated) / COUNT(*), 2) as signing_efficiency
-FROM validator_participation 
+    COALESCE(ROUND(100.0 * SUM(participated) / NULLIF(COUNT(*), 0), 2), 0.0) as signing_efficiency
+FROM validator_participation
 GROUP BY hex_address, moniker
 ORDER BY signing_efficiency DESC;
 

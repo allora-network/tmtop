@@ -12,26 +12,28 @@ import (
 
 const getAllValidatorsSigningEfficiency = `-- name: GetAllValidatorsSigningEfficiency :many
 WITH validator_participation AS (
-    SELECT 
+    SELECT
         vals.hex_address,
         vals.moniker,
         h.height,
-        CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END as participated
+        CASE WHEN EXISTS (
+            SELECT 1 FROM votes v
+            WHERE v.validator_hex_address = vals.hex_address AND v.height = h.height
+        ) THEN 1 ELSE 0 END as participated
     FROM validators vals
     CROSS JOIN heights h
-    LEFT JOIN votes v ON vals.hex_address = v.validator_hex_address AND h.height = v.height
     WHERE h.block_time >= ? AND h.block_time <= ?
 )
-SELECT 
+SELECT
     hex_address,
     moniker,
     COUNT(*) as total_blocks,
     SUM(participated) as blocks_signed,
     COUNT(*) - SUM(participated) as blocks_missed,
-    ROUND(100.0 * SUM(participated) / COUNT(*), 2) as signing_efficiency
-FROM validator_participation 
+    COALESCE(ROUND(100.0 * SUM(participated) / NULLIF(COUNT(*), 0), 2), 0.0) as signing_efficiency
+FROM validator_participation
 GROUP BY hex_address, moniker
-ORDER BY signing_efficiency DESC
+ORDER BY signing_efficiency DE
 `
 
 type GetAllValidatorsSigningEfficiencyParams struct {
@@ -45,10 +47,14 @@ type GetAllValidatorsSigningEfficiencyRow struct {
 	TotalBlocks       int64           `json:"total_blocks"`
 	BlocksSigned      sql.NullFloat64 `json:"blocks_signed"`
 	BlocksMissed      int64           `json:"blocks_missed"`
-	SigningEfficiency float64         `json:"signing_efficiency"`
+	SigningEfficiency interface{}     `json:"signing_efficiency"`
 }
 
-// Get signing efficiency for all validators over a time window
+// Get signing efficiency for all validators over a time window.
+// The CTE collapses participation to one row per (validator, height) using
+// EXISTS rather than LEFT JOIN votes — a validator with both a prevote and
+// a precommit at the same height would otherwise appear twice and inflate
+// both total_blocks and blocks_signed.
 func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg GetAllValidatorsSigningEfficiencyParams) ([]GetAllValidatorsSigningEfficiencyRow, error) {
 	rows, err := q.query(ctx, q.getAllValidatorsSigningEfficiencyStmt, getAllValidatorsSigningEfficiency, arg.BlockTime, arg.BlockTime_2)
 	if err != nil {
@@ -80,13 +86,15 @@ func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg Get
 }
 
 const getProposerPerformance = `-- name: GetProposerPerformance :one
+s;
+
 SELECT 
     COUNT(*) as blocks_proposed,
     COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as successful_proposals,
     ROUND(100.0 * COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) / COUNT(*), 2) as proposal_success_rate
 FROM rounds r
 JOIN heights h ON r.height = h.height
-WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time <= ?
+WHERE r.proposer_address = ? AND h.block_time >= ? AND h.block_time <=
 `
 
 type GetProposerPerformanceParams struct {
@@ -245,6 +253,8 @@ func (q *Queries) GetValidatorMissedBlockStreaks(ctx context.Context, arg GetVal
 }
 
 const getValidatorPerformanceTimeSeries = `-- name: GetValidatorPerformanceTimeSeries :many
+C;
+
 WITH time_buckets AS (
     SELECT 
         datetime(h.block_time, 'start of hour') as time_bucket,
@@ -262,7 +272,7 @@ SELECT
     COALESCE(blocks_in_bucket - blocks_signed, 0) as blocks_missed,
     COALESCE(ROUND(100.0 * blocks_signed / NULLIF(blocks_in_bucket, 0), 2), 0.0) as signing_efficiency
 FROM time_buckets 
-ORDER BY time_bucket
+ORDER BY time_buck
 `
 
 type GetValidatorPerformanceTimeSeriesParams struct {
@@ -310,6 +320,8 @@ func (q *Queries) GetValidatorPerformanceTimeSeries(ctx context.Context, arg Get
 }
 
 const getValidatorRanking = `-- name: GetValidatorRanking :many
+t;
+
 WITH validator_metrics AS (
     SELECT 
         vals.hex_address,
@@ -344,7 +356,7 @@ SELECT
     voting_power,
     RANK() OVER (ORDER BY signing_efficiency DESC, voting_power DESC) as efficiency_rank
 FROM validator_metrics
-ORDER BY efficiency_rank
+ORDER BY efficiency_ra
 `
 
 type GetValidatorRankingParams struct {
@@ -447,6 +459,8 @@ func (q *Queries) GetValidatorSigningEfficiency(ctx context.Context, arg GetVali
 }
 
 const getValidatorUptime = `-- name: GetValidatorUptime :one
+k;
+
 WITH block_stats AS (
     SELECT 
         COUNT(*) as total_blocks_in_window,
@@ -464,7 +478,7 @@ SELECT
     COALESCE(ROUND(100.0 * bs.blocks_participated / NULLIF(bs.total_blocks_in_window, 0), 2), 0.0) as uptime_percentage,
     bs.window_start,
     bs.window_end
-FROM block_stats bs
+FROM block_stats
 `
 
 type GetValidatorUptimeParams struct {

@@ -33,7 +33,11 @@ type Querier interface {
 	DeleteValidator(ctx context.Context, hexAddress string) error
 	DeleteValidatorSnapshotsOlderThan(ctx context.Context, height int64) error
 	DeleteVotesOlderThan(ctx context.Context, height int64) error
-	// Get signing efficiency for all validators over a time window
+	// Get signing efficiency for all validators over a time window.
+	// The CTE collapses participation to one row per (validator, height) using
+	// EXISTS rather than LEFT JOIN votes — a validator with both a prevote and
+	// a precommit at the same height would otherwise appear twice and inflate
+	// both total_blocks and blocks_signed.
 	GetAllValidatorsSigningEfficiency(ctx context.Context, arg GetAllValidatorsSigningEfficiencyParams) ([]GetAllValidatorsSigningEfficiencyRow, error)
 	GetConsensusEvent(ctx context.Context, id int64) (ConsensusEvent, error)
 	GetConsensusEventsByType(ctx context.Context, arg GetConsensusEventsByTypeParams) ([]ConsensusEvent, error)
