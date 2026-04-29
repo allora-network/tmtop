@@ -34,6 +34,25 @@ func NewRoundDataMap() *RoundDataMap {
 	}
 }
 
+// copyRoundData returns a deep copy of rd that the caller can read,
+// mutate, or retain past the iteration without aliasing internal state.
+// Iter / ReverseIter yield through this so the concurrent-safety
+// contract isn't broken by the obvious "stash this pointer" anti-pattern.
+func copyRoundData(rd *RoundData) *RoundData {
+	out := &RoundData{
+		Proposers: rd.Proposers.Copy(),
+		Votes:     make(map[string]map[cptypes.SignedMsgType]ctypes.BlockID, len(rd.Votes)),
+	}
+	for validator, votesMap := range rd.Votes {
+		dst := make(map[cptypes.SignedMsgType]ctypes.BlockID, len(votesMap))
+		for msgType, blockID := range votesMap {
+			dst[msgType] = blockID
+		}
+		out.Votes[validator] = dst
+	}
+	return out
+}
+
 func (v *RoundDataMap) Iter() func(yield func(HeightAndRound, *RoundData) bool) {
 	return func(yield func(hr HeightAndRound, rd *RoundData) bool) {
 		v.mu.RLock()
@@ -41,7 +60,7 @@ func (v *RoundDataMap) Iter() func(yield func(HeightAndRound, *RoundData) bool) 
 
 		for height, heightMap := range v.heights.Iter() {
 			for round, roundData := range heightMap.Iter() {
-				if !yield(HeightAndRound{height, round}, roundData) {
+				if !yield(HeightAndRound{height, round}, copyRoundData(roundData)) {
 					return
 				}
 			}
@@ -56,7 +75,7 @@ func (v *RoundDataMap) ReverseIter() func(yield func(HeightAndRound, *RoundData)
 
 		for height, heightMap := range v.heights.ReverseIter() {
 			for round, roundData := range heightMap.ReverseIter() {
-				if !yield(HeightAndRound{height, round}, roundData) {
+				if !yield(HeightAndRound{height, round}, copyRoundData(roundData)) {
 					return
 				}
 			}
