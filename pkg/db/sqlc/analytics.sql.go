@@ -33,7 +33,7 @@ SELECT
     COALESCE(ROUND(100.0 * SUM(participated) / NULLIF(COUNT(*), 0), 2), 0.0) as signing_efficiency
 FROM validator_participation
 GROUP BY hex_address, moniker
-ORDER BY signing_efficiency DE
+ORDER BY signing_efficiency DESC
 `
 
 type GetAllValidatorsSigningEfficiencyParams struct {
@@ -52,7 +52,7 @@ type GetAllValidatorsSigningEfficiencyRow struct {
 
 // Get signing efficiency for all validators over a time window.
 // The CTE collapses participation to one row per (validator, height) using
-// EXISTS rather than LEFT JOIN votes — a validator with both a prevote and
+// EXISTS rather than LEFT JOIN votes - a validator with both a prevote and
 // a precommit at the same height would otherwise appear twice and inflate
 // both total_blocks and blocks_signed.
 func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg GetAllValidatorsSigningEfficiencyParams) ([]GetAllValidatorsSigningEfficiencyRow, error) {
@@ -86,8 +86,6 @@ func (q *Queries) GetAllValidatorsSigningEfficiency(ctx context.Context, arg Get
 }
 
 const getProposerPerformance = `-- name: GetProposerPerformance :one
-s bs;
-
 SELECT
     COUNT(*) as total_proposing_opportunities,
     COUNT(CASE WHEN r.proposer_address = ? THEN 1 END) as blocks_proposed_by_validator,
@@ -97,7 +95,7 @@ SELECT
         2), 0.0) as proposal_share_rate
 FROM rounds r
 JOIN heights h ON r.height = h.height
-WHERE h.block_time >= ? AND h.block_time
+WHERE h.block_time >= ? AND h.block_time <= ?
 `
 
 type GetProposerPerformanceParams struct {
@@ -260,8 +258,6 @@ func (q *Queries) GetValidatorMissedBlockStreaks(ctx context.Context, arg GetVal
 }
 
 const getValidatorPerformanceTimeSeries = `-- name: GetValidatorPerformanceTimeSeries :many
-C;
-
 WITH time_buckets AS (
     SELECT 
         datetime(h.block_time, 'start of hour') as time_bucket,
@@ -279,7 +275,7 @@ SELECT
     COALESCE(blocks_in_bucket - blocks_signed, 0) as blocks_missed,
     COALESCE(ROUND(100.0 * blocks_signed / NULLIF(blocks_in_bucket, 0), 2), 0.0) as signing_efficiency
 FROM time_buckets 
-ORDER BY time_buck
+ORDER BY time_bucket
 `
 
 type GetValidatorPerformanceTimeSeriesParams struct {
@@ -327,8 +323,6 @@ func (q *Queries) GetValidatorPerformanceTimeSeries(ctx context.Context, arg Get
 }
 
 const getValidatorRanking = `-- name: GetValidatorRanking :many
-t;
-
 WITH validator_metrics AS (
     SELECT
         vals.hex_address,
@@ -367,7 +361,7 @@ SELECT
     voting_power,
     RANK() OVER (ORDER BY signing_efficiency DESC, voting_power DESC) as efficiency_rank
 FROM validator_metrics
-ORDER BY efficiency_
+ORDER BY efficiency_rank
 `
 
 type GetValidatorRankingParams struct {
@@ -390,7 +384,7 @@ type GetValidatorRankingRow struct {
 
 // Get validator performance ranking with multiple metrics.
 // total_blocks and blocks_signed are computed against distinct heights, not
-// vote rows — otherwise a validator with both prevote and precommit per
+// vote rows - otherwise a validator with both prevote and precommit per
 // height would have its block counts doubled (and ratios were preserved by
 // coincidence, but raw counts were wrong).
 func (q *Queries) GetValidatorRanking(ctx context.Context, arg GetValidatorRankingParams) ([]GetValidatorRankingRow, error) {
@@ -474,8 +468,6 @@ func (q *Queries) GetValidatorSigningEfficiency(ctx context.Context, arg GetVali
 }
 
 const getValidatorUptime = `-- name: GetValidatorUptime :one
-ank;
-
 WITH block_stats AS (
     SELECT
         COUNT(DISTINCT h.height) as total_blocks_in_window,
@@ -493,7 +485,7 @@ SELECT
     COALESCE(ROUND(100.0 * bs.blocks_participated / NULLIF(bs.total_blocks_in_window, 0), 2), 0.0) as uptime_percentage,
     bs.window_start,
     bs.window_end
-FROM block_sta
+FROM block_stats bs
 `
 
 type GetValidatorUptimeParams struct {
@@ -512,7 +504,7 @@ type GetValidatorUptimeRow struct {
 }
 
 // Calculate validator uptime metrics over time window.
-// COUNT(*) and COUNT(v.id) operate on the heights×votes join, so a
+// COUNT(*) and COUNT(v.id) operate on the heightsxvotes join, so a
 // height with both prevote and precommit rows would inflate both
 // counters. Use COUNT(DISTINCT h.height) and COUNT(DISTINCT CASE WHEN
 // v.id IS NOT NULL THEN h.height END) so each height contributes at

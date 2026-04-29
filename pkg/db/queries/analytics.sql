@@ -76,7 +76,7 @@ ORDER BY consecutive_misses DESC;
 -- name: GetAllValidatorsSigningEfficiency :many
 -- Get signing efficiency for all validators over a time window.
 -- The CTE collapses participation to one row per (validator, height) using
--- EXISTS rather than LEFT JOIN votes — a validator with both a prevote and
+-- EXISTS rather than LEFT JOIN votes - a validator with both a prevote and
 -- a precommit at the same height would otherwise appear twice and inflate
 -- both total_blocks and blocks_signed.
 WITH validator_participation AS (
@@ -127,7 +127,7 @@ ORDER BY time_bucket;
 -- name: GetValidatorRanking :many
 -- Get validator performance ranking with multiple metrics.
 -- total_blocks and blocks_signed are computed against distinct heights, not
--- vote rows — otherwise a validator with both prevote and precommit per
+-- vote rows - otherwise a validator with both prevote and precommit per
 -- height would have its block counts doubled (and ratios were preserved by
 -- coincidence, but raw counts were wrong).
 WITH validator_metrics AS (
@@ -172,7 +172,7 @@ ORDER BY efficiency_rank;
 
 -- name: GetValidatorUptime :one
 -- Calculate validator uptime metrics over time window.
--- COUNT(*) and COUNT(v.id) operate on the heights×votes join, so a
+-- COUNT(*) and COUNT(v.id) operate on the heightsxvotes join, so a
 -- height with both prevote and precommit rows would inflate both
 -- counters. Use COUNT(DISTINCT h.height) and COUNT(DISTINCT CASE WHEN
 -- v.id IS NOT NULL THEN h.height END) so each height contributes at
