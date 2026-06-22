@@ -23,6 +23,7 @@ type Fetcher interface {
 	Block(height int64) (*rpctypes.ResultBlock, error)
 	GetBlockTime() (time.Duration, error)
 	GetNetInfo(rpcURL string) (*types.NetInfo, error)
+	GetNumUnconfirmedTxs() (int64, int64, error)
 	GetUpgradePlan() (*types.Upgrade, error)
 	GetValidators() ([]types.TMValidator, error)
 	Subscribe(mb *butils.Mailbox[ctypes.TMEventData], events ...string)
