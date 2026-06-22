@@ -47,9 +47,8 @@ func TestStepTimingBasicPropose(t *testing.T) {
 	if nh.AvgPrevoteTime != 0 {
 		t.Errorf("AvgPrevoteTime: got %v, want 0", nh.AvgPrevoteTime)
 	}
-	if nh.StepTimingSample != 1 {
-		// StepTimingSample counts precommit observations; propose only → 0 is fine
-		// per brief "b.step.precommit.count" — no precommit yet
+	if nh.StepTimingSample != 0 {
+		t.Errorf("StepTimingSample: got %v, want 0 (no precommit observed)", nh.StepTimingSample)
 	}
 }
 
