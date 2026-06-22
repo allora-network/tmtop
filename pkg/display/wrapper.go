@@ -45,6 +45,7 @@ type Wrapper struct {
 	NetInfoTableData         *NetInfoTableData
 	ValidatorHealthTable     *tview.Table
 	ValidatorHealthTableData *ValidatorHealthTableData
+	NetworkHealthTextView    *tview.TextView
 	RPCsTable                *tview.Table
 	RPCsTableData            *RPCsTableData
 	Grid                  *tview.Grid
@@ -131,6 +132,9 @@ func NewWrapper(
 		SetDynamicColors(true).
 		SetRegions(true)
 
+	networkHealthTextView := tview.NewTextView().
+		SetDynamicColors(true)
+
 	debugTextView := tview.NewTextView().
 		SetDynamicColors(true).
 		SetRegions(true)
@@ -160,6 +164,7 @@ func NewWrapper(
 		NetInfoTableData:         netInfoTableData,
 		ValidatorHealthTable:     validatorHealthTable,
 		ValidatorHealthTableData: validatorHealthTableData,
+		NetworkHealthTextView:    networkHealthTextView,
 		RPCsTable:                rpcsTable,
 		RPCsTableData:         rpcsTableData,
 		HelpModal:             helpModal,
@@ -246,6 +251,7 @@ func (w *Wrapper) Start() error {
 	w.AllRoundsTable.SetBackgroundColor(tcell.ColorDefault)
 	w.NetInfoTable.SetBackgroundColor(tcell.ColorDefault)
 	w.ValidatorHealthTable.SetBackgroundColor(tcell.ColorDefault)
+	w.NetworkHealthTextView.SetBackgroundColor(tcell.ColorDefault)
 	w.RPCsTable.SetBackgroundColor(tcell.ColorSteelBlue)
 	w.ChainInfoTextView.SetBackgroundColor(tcell.ColorDefault)
 	w.ConsensusInfoTextView.SetBackgroundColor(tcell.ColorDefault)
@@ -342,6 +348,9 @@ func (w *Wrapper) SetState(state *types.State) {
 		}
 		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
 
+		w.NetworkHealthTextView.Clear()
+		_, _ = fmt.Fprint(w.NetworkHealthTextView, SerializeNetworkHealth(state, w.DisableEmojis))
+
 		w.ConsensusInfoTextView.Clear()
 		w.ChainInfoTextView.Clear()
 		w.ProgressTextView.Clear()
@@ -422,16 +431,19 @@ func (w *Wrapper) ChangeMode() {
 }
 
 func (w *Wrapper) Redraw() {
-	table := w.LastRoundTable
+	// mainWidget is the full-height primitive placed below the info blocks.
+	// For table-based modes it is a *tview.Table; for ModeNetworkHealth it is
+	// the dedicated TextView.
+	var mainWidget tview.Primitive = w.LastRoundTable
 	if w.Mode == ModeAllRounds {
-		table = w.AllRoundsTable
+		mainWidget = w.AllRoundsTable
 	} else if w.Mode == ModeNetInfo {
-		table = w.NetInfoTable
+		mainWidget = w.NetInfoTable
 	} else if w.Mode == ModeValidatorHealth {
-		table = w.ValidatorHealthTable
+		mainWidget = w.ValidatorHealthTable
+	} else if w.Mode == ModeNetworkHealth {
+		mainWidget = w.NetworkHealthTextView
 	}
-	// ModeNetworkHealth falls through to the default (LastRoundTable) until
-	// Task 0.7 wires its own widget; this prevents a nil-table crash.
 
 	w.Grid.RemoveItem(w.ConsensusInfoTextView)
 	w.Grid.RemoveItem(w.ChainInfoTextView)
@@ -439,6 +451,7 @@ func (w *Wrapper) Redraw() {
 	w.Grid.RemoveItem(w.LastRoundTable)
 	w.Grid.RemoveItem(w.AllRoundsTable)
 	w.Grid.RemoveItem(w.ValidatorHealthTable)
+	w.Grid.RemoveItem(w.NetworkHealthTextView)
 	w.Grid.RemoveItem(w.DebugTextView)
 
 	w.Grid.AddItem(w.ConsensusInfoTextView, 0, 0, w.InfoBlockWidth, 3, 1, 1, false)
@@ -447,7 +460,7 @@ func (w *Wrapper) Redraw() {
 
 	if w.DebugEnabled {
 		w.Grid.AddItem(
-			table,
+			mainWidget,
 			w.InfoBlockWidth,
 			0,
 			RowsAmount-w.InfoBlockWidth-DebugBlockHeight,
@@ -468,7 +481,7 @@ func (w *Wrapper) Redraw() {
 		)
 	} else {
 		w.Grid.AddItem(
-			table,
+			mainWidget,
 			w.InfoBlockWidth,
 			0,
 			RowsAmount-w.InfoBlockWidth,
@@ -479,7 +492,7 @@ func (w *Wrapper) Redraw() {
 		)
 	}
 
-	w.App.SetFocus(table)
+	w.App.SetFocus(mainWidget)
 
 	if w.IsHelpDisplayed {
 		w.Pages.AddPage("modal", w.HelpModal, true, true)
@@ -498,7 +511,7 @@ func (w *Wrapper) Redraw() {
 		w.App.SetFocus(w.RPCsTable)
 	} else {
 		w.Pages.RemovePage("rpclist")
-		w.App.SetFocus(table)
+		w.App.SetFocus(mainWidget)
 	}
 }
 
