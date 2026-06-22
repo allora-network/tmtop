@@ -167,11 +167,11 @@ func TestArrivalStatsMapping(t *testing.T) {
 	}
 
 	rows := []inputRow{
-		{"addr1", 1, float64(0.5), float64(1.2)},  // prevote
-		{"addr1", 2, float64(0.3), float64(0.9)},  // precommit
-		{"addr2", 1, float64(1.0), float64(2.0)},  // prevote only
-		{"addr3", 2, float64(0.1), float64(0.4)},  // precommit only
-		{"addr4", 1, nil, nil},                     // nil → zero duration (COALESCE edge)
+		{"addr1", 1, float64(0.5), float64(1.2)}, // prevote
+		{"addr1", 2, float64(0.3), float64(0.9)}, // precommit
+		{"addr2", 1, float64(1.0), float64(2.0)}, // prevote only
+		{"addr3", 2, float64(0.1), float64(0.4)}, // precommit only
+		{"addr4", 1, nil, nil},                   // nil → zero duration (COALESCE edge)
 	}
 
 	// Replicate the mapping loop from GetVoteArrivalByHeight.
@@ -191,19 +191,19 @@ func TestArrivalStatsMapping(t *testing.T) {
 		out[r.hexAddress] = s
 	}
 
-	assert.Equal(t, secsToDur(0.5), out["addr1"].AvgPrevote,   "addr1 AvgPrevote")
-	assert.Equal(t, secsToDur(1.2), out["addr1"].MaxPrevote,   "addr1 MaxPrevote")
+	assert.Equal(t, secsToDur(0.5), out["addr1"].AvgPrevote, "addr1 AvgPrevote")
+	assert.Equal(t, secsToDur(1.2), out["addr1"].MaxPrevote, "addr1 MaxPrevote")
 	assert.Equal(t, secsToDur(0.3), out["addr1"].AvgPrecommit, "addr1 AvgPrecommit")
 	assert.Equal(t, secsToDur(0.9), out["addr1"].MaxPrecommit, "addr1 MaxPrecommit")
 
-	assert.Equal(t, secsToDur(1.0), out["addr2"].AvgPrevote,       "addr2 AvgPrevote")
-	assert.Equal(t, time.Duration(0), out["addr2"].AvgPrecommit,    "addr2 AvgPrecommit should be zero")
+	assert.Equal(t, secsToDur(1.0), out["addr2"].AvgPrevote, "addr2 AvgPrevote")
+	assert.Equal(t, time.Duration(0), out["addr2"].AvgPrecommit, "addr2 AvgPrecommit should be zero")
 
-	assert.Equal(t, time.Duration(0), out["addr3"].AvgPrevote,      "addr3 AvgPrevote should be zero")
-	assert.Equal(t, secsToDur(0.1), out["addr3"].AvgPrecommit,      "addr3 AvgPrecommit")
+	assert.Equal(t, time.Duration(0), out["addr3"].AvgPrevote, "addr3 AvgPrevote should be zero")
+	assert.Equal(t, secsToDur(0.1), out["addr3"].AvgPrecommit, "addr3 AvgPrecommit")
 
-	assert.Equal(t, time.Duration(0), out["addr4"].AvgPrevote,      "addr4 nil avgSecs → zero duration")
-	assert.Equal(t, time.Duration(0), out["addr4"].MaxPrevote,      "addr4 nil maxSecs → zero duration")
+	assert.Equal(t, time.Duration(0), out["addr4"].AvgPrevote, "addr4 nil avgSecs → zero duration")
+	assert.Equal(t, time.Duration(0), out["addr4"].MaxPrevote, "addr4 nil maxSecs → zero duration")
 }
 
 func TestTimeSeriesPoint(t *testing.T) {
