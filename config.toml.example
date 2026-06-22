@@ -121,6 +121,25 @@ max-retain-blocks = 10000
 max-retain-days = 7
 
 # ==============================================================================
+# ASN / Hosting Concentration (Optional)
+# ==============================================================================
+
+# Path to a local ip2asn-v4.tsv database for offline ASN lookups.
+# When set, the Network Health panel shows the top hosting providers by
+# combined voting power, and each row in the Validator Health table gains
+# ASN/org columns where the peer's IP is known.
+#
+# Download the public-domain dataset from https://iptoasn.com/:
+#   curl -o ip2asn-v4.tsv.gz https://iptoasn.com/data/ip2asn-v4.tsv.gz
+#   gunzip ip2asn-v4.tsv.gz
+#
+# The file is updated daily by iptoasn.com.  Leave empty to disable ASN enrichment.
+#
+# Note: ASN coverage depends on the peer graph being populated.  Enable the
+# topology API (with-topology-api = true) to maximise peer discovery.
+# asn-database-path = "/path/to/ip2asn-v4.tsv"
+
+# ==============================================================================
 # Example Configurations
 # ==============================================================================
 
