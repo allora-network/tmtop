@@ -10,25 +10,42 @@ import (
 
 // equivState accumulates per-slot first-seen BlockID hashes and any detected
 // equivocation events across ObserveEvents calls.
+//
+// Memory is bounded: height buckets older than (currentHeight - windowBlocks)
+// are evicted after each observation, and events is capped at maxEquivEvents.
 type equivState struct {
-	// seen maps equivKey → hex representation of the first non-nil BlockID seen
-	// for that (validatorAddress, height, round, voteType) slot.
-	seen   map[string]string
+	// seen maps height → slotKey → hex of first non-nil BlockID seen for that slot.
+	// slotKey = validatorAddress + "|" + round + "|" + voteType
+	seen   map[int64]map[string]string
 	events []EquivocationEvent
 }
 
+const maxEquivEvents = 256
+
+// defaultEvictionWindow is the fallback cap when Builder.windowBlocks == 0.
+// Prevents unbounded growth even when no window is configured.
+const defaultEvictionWindow = int64(500)
+
 func newEquivState() equivState {
-	return equivState{seen: map[string]string{}}
+	return equivState{seen: map[int64]map[string]string{}}
 }
 
-// equivKey produces the map key for a vote slot.
-func equivKey(addr string, h int64, r int32, vt cmtproto.SignedMsgType) string {
-	return fmt.Sprintf("%s|%d|%d|%d", addr, h, r, vt)
+// slotKey produces the inner map key for a vote slot within a single height.
+// Format: validatorAddress + "|" + round + "|" + voteType-int
+func slotKey(addr string, r int32, vt cmtproto.SignedMsgType) string {
+	return fmt.Sprintf("%s|%d|%d", addr, r, vt)
 }
 
-// observeForEquivocation inspects a TMEventData value. When the event is an
-// EventDataVote carrying a non-nil BlockID and the same slot has already been
-// seen with a *different* BlockID, an EquivocationEvent is appended.
+// observeForEquivocation inspects a TMEventData value.
+//
+// Scope: conflicts are detected within the same (height, round, voteType).
+// PartSetHeader differences are ignored. Only non-nil BlockID.Hash values
+// constitute evidence — nil/empty votes indicate a validator chose not to
+// vote for a specific block and are not equivocation evidence per the
+// CometBFT spec.
+//
+// When the same (validator, height, round, voteType) slot is seen with two
+// distinct non-nil block IDs, exactly one EquivocationEvent is emitted.
 func (b *Builder) observeForEquivocation(e ctypes.TMEventData) {
 	vd, ok := e.(ctypes.EventDataVote)
 	if !ok || vd.Vote == nil {
@@ -40,23 +57,43 @@ func (b *Builder) observeForEquivocation(e ctypes.TMEventData) {
 		return
 	}
 	blockIDHex := v.BlockID.Hash.String()
-	key := equivKey(v.ValidatorAddress.String(), v.Height, v.Round, v.Type)
+	height := v.Height
+	sk := slotKey(v.ValidatorAddress.String(), v.Round, v.Type)
 
-	prev, exists := b.equiv.seen[key]
-	if !exists {
-		b.equiv.seen[key] = blockIDHex
-		return
+	// Ensure height bucket exists.
+	if b.equiv.seen[height] == nil {
+		b.equiv.seen[height] = map[string]string{}
 	}
-	if prev != blockIDHex {
-		b.equiv.events = append(b.equiv.events, EquivocationEvent{
+	prev, exists := b.equiv.seen[height][sk]
+	if !exists {
+		b.equiv.seen[height][sk] = blockIDHex
+	} else if prev != blockIDHex {
+		ev := EquivocationEvent{
 			ValidatorAddress: v.ValidatorAddress.String(),
-			Height:           v.Height,
+			Height:           height,
 			Round:            v.Round,
 			VoteType:         voteTypeName(v.Type),
 			BlockIDA:         prev,
 			BlockIDB:         blockIDHex,
 			DetectedAt:       b.now(),
-		})
+		}
+		b.equiv.events = append(b.equiv.events, ev)
+		// Cap events to prevent unbounded growth from a pathological stream.
+		if len(b.equiv.events) > maxEquivEvents {
+			b.equiv.events = b.equiv.events[len(b.equiv.events)-maxEquivEvents:]
+		}
+	}
+
+	// Evict height buckets outside the retention window.
+	window := b.windowBlocks
+	if window <= 0 {
+		window = defaultEvictionWindow
+	}
+	cutoff := height - window
+	for h := range b.equiv.seen {
+		if h < cutoff {
+			delete(b.equiv.seen, h)
+		}
 	}
 }
 

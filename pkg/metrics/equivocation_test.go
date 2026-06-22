@@ -169,3 +169,70 @@ func TestEquivocationEventFields(t *testing.T) {
 		t.Errorf("BlockIDA and BlockIDB must differ; both are %q", ev.BlockIDA)
 	}
 }
+
+// TestEquivocationEviction verifies that height buckets outside the window
+// are evicted from seen, so memory does not grow unboundedly.
+func TestEquivocationEviction(t *testing.T) {
+	// windowBlocks = 10; after observing at height 50, heights < 40 must be gone.
+	b := &Builder{equiv: newEquivState(), now: fixedNow, windowBlocks: 10}
+	addr := makeAddr(t)
+
+	// Seed votes at heights 1 and 2 — both will be outside window once we reach 50.
+	b.observeForEquivocation(voteEvent(addr, 1, 0, cmtproto.PrevoteType, "AAAA"))
+	b.observeForEquivocation(voteEvent(addr, 2, 0, cmtproto.PrevoteType, "AAAA"))
+
+	// Observe a vote at height 50 — triggers eviction of heights < 40.
+	b.observeForEquivocation(voteEvent(addr, 50, 0, cmtproto.PrevoteType, "AAAA"))
+
+	// Heights 1 and 2 must no longer be in seen.
+	if _, ok := b.equiv.seen[1]; ok {
+		t.Errorf("height 1 should have been evicted but is still in seen")
+	}
+	if _, ok := b.equiv.seen[2]; ok {
+		t.Errorf("height 2 should have been evicted but is still in seen")
+	}
+	// Height 50 must still be present (it is within the window).
+	if _, ok := b.equiv.seen[50]; !ok {
+		t.Errorf("height 50 should still be in seen but was evicted")
+	}
+}
+
+// TestEquivocationDefaultWindowEviction verifies that when windowBlocks == 0,
+// the defaultEvictionWindow is used instead of growing without bound.
+func TestEquivocationDefaultWindowEviction(t *testing.T) {
+	// windowBlocks = 0 → falls back to defaultEvictionWindow (500).
+	b := &Builder{equiv: newEquivState(), now: fixedNow, windowBlocks: 0}
+	addr := makeAddr(t)
+
+	// Seed a vote at height 1.
+	b.observeForEquivocation(voteEvent(addr, 1, 0, cmtproto.PrevoteType, "AAAA"))
+
+	// Observe a vote at height = defaultEvictionWindow + 10.
+	// cutoff = (500+10) - 500 = 10 → height 1 should be evicted.
+	triggerHeight := defaultEvictionWindow + 10
+	b.observeForEquivocation(voteEvent(addr, triggerHeight, 0, cmtproto.PrevoteType, "AAAA"))
+
+	if _, ok := b.equiv.seen[1]; ok {
+		t.Errorf("height 1 should have been evicted by default window but is still in seen")
+	}
+}
+
+// TestEquivocationEventsCapped verifies that the events slice never exceeds
+// maxEquivEvents, dropping oldest entries.
+func TestEquivocationEventsCapped(t *testing.T) {
+	b := &Builder{equiv: newEquivState(), now: fixedNow, windowBlocks: 0}
+	addr := makeAddr(t)
+
+	// Generate maxEquivEvents+10 distinct equivocations, each at a unique height
+	// so they don't share a slot (preventing de-duplication logic from interfering).
+	total := maxEquivEvents + 10
+	for i := 0; i < total; i++ {
+		h := int64(i + 1)
+		b.observeForEquivocation(voteEvent(addr, h, 0, cmtproto.PrecommitType, "AAAA"))
+		b.observeForEquivocation(voteEvent(addr, h, 0, cmtproto.PrecommitType, "BBBB"))
+	}
+
+	if len(b.equiv.events) > maxEquivEvents {
+		t.Errorf("events slice grew to %d, want at most %d", len(b.equiv.events), maxEquivEvents)
+	}
+}
