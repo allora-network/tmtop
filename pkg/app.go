@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"main/pkg/analytics"
+	"main/pkg/asn"
 	configPkg "main/pkg/config"
 	"main/pkg/crawler"
 	"main/pkg/db"
@@ -17,6 +18,7 @@ import (
 	"main/pkg/fetcher"
 	tmhttp "main/pkg/http"
 	loggerPkg "main/pkg/logger"
+	"main/pkg/metrics"
 	"main/pkg/refresher"
 	"main/pkg/topology"
 	"main/pkg/types"
@@ -37,6 +39,8 @@ type App struct {
 
 	DB             *db.DB
 	ConsensusStore db.ConsensusStorer
+
+	MetricsBuilder *metrics.Builder
 
 	DataFetcher fetcher.Fetcher
 
@@ -93,6 +97,21 @@ func NewApp(config *configPkg.Config, version string) *App {
 		logger.Info().Str("path", dbPath).Msg("Database initialized successfully")
 	}
 
+	var an *analytics.ValidatorAnalytics
+	if database != nil {
+		an = analytics.NewValidatorAnalytics(database, logger)
+	}
+	var asnLookup *asn.Lookup
+	if config.ASNDatabasePath != "" {
+		l, err := asn.Load(config.ASNDatabasePath)
+		if err != nil {
+			logger.Warn().Err(err).Msg("ASN dataset load failed; ASN metrics disabled")
+		} else {
+			asnLookup = l
+		}
+	}
+	metricsBuilder := metrics.NewBuilder(logger, time.Now, an, asnLookup, config.HealthWindowBlocks)
+
 	app := &App{
 		Logger:         logger,
 		Version:        version,
@@ -101,6 +120,7 @@ func NewApp(config *configPkg.Config, version string) *App {
 		mbLogs:         mbLogs,
 		DB:             database,
 		ConsensusStore: consensusStore,
+		MetricsBuilder: metricsBuilder,
 		DataFetcher:    fetcher.NewDataFetcher(config, state, logger),
 		chStop:         make(chan struct{}),
 		wgDone:         &sync.WaitGroup{},
@@ -140,6 +160,7 @@ func (a *App) Start() {
 	a.spawnRefresher("upgrade", a.Config.UpgradeRefreshRate, a.RefreshUpgrade)
 	a.spawnRefresher("block-time", a.Config.BlockTimeRefreshRate, a.RefreshBlockTime)
 	a.spawnRefresher("net-info", a.Config.RefreshRate, a.RefreshNetInfo)
+	a.spawnRefresher("health", a.Config.HealthRefreshRate, a.RefreshHealthMetrics)
 
 	a.spawn(a.SubscribeCometBFT)
 	a.spawn(a.DisplayLogs)
@@ -371,6 +392,16 @@ func (a *App) RefreshNetInfo() {
 	a.DisplayWrapper.SetState(a.State)
 }
 
+func (a *App) RefreshHealthMetrics() {
+	if a.IsPaused.Load() {
+		return
+	}
+	nh, rows := a.MetricsBuilder.Build(a.State)
+	a.State.SetNetworkHealth(nh)
+	a.State.SetValidatorHealth(rows)
+	a.DisplayWrapper.SetState(a.State)
+}
+
 func (a *App) SubscribeCometBFT() {
 	defer a.HandlePanic()
 
@@ -379,6 +410,7 @@ func (a *App) SubscribeCometBFT() {
 	mbEvents := butils.NewMailbox[ctypes.TMEventData](1000)
 	a.DataFetcher.Subscribe(mbEvents, "Vote")
 	a.DataFetcher.Subscribe(mbEvents, "NewRound")
+	a.DataFetcher.Subscribe(mbEvents, "NewRoundStep")
 
 	for {
 		select {
@@ -387,6 +419,7 @@ func (a *App) SubscribeCometBFT() {
 		case <-mbEvents.Notify():
 			events := mbEvents.RetrieveAll()
 			a.State.AddCometBFTEvents(events)
+			a.MetricsBuilder.ObserveEvents(events)
 
 			if len(events) > 0 {
 				ctx := context.Background()

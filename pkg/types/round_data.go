@@ -135,6 +135,9 @@ func (v *RoundDataMap) AddVote(height int64, round int32, validator string, msgT
 		roundData.Votes[validator] = votesMap
 	}
 
+	// EQUIVOCATION-HOOK: a second vote from the same (validator, msgType) in the
+	// same (height, round) overwrites the prior BlockID here. WS-G detects this
+	// by inspecting the existing value before the write. No behavior change in Phase 0.
 	votesMap[msgType] = blockID
 }
 
