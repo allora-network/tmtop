@@ -254,3 +254,16 @@ func (rpc *CometRPC) GetNetInfo() (*types.NetInfo, error) {
 	}
 	return &result, nil
 }
+
+func (rpc *CometRPC) GetNumUnconfirmedTxs() (int64, int64, error) {
+	var result struct {
+		Total      string `json:"total"`
+		TotalBytes string `json:"total_bytes"`
+	}
+	if err := rpc.request("/num_unconfirmed_txs", &result); err != nil {
+		return 0, 0, err
+	}
+	txs, _ := strconv.ParseInt(result.Total, 10, 64)
+	bytes, _ := strconv.ParseInt(result.TotalBytes, 10, 64)
+	return txs, bytes, nil
+}

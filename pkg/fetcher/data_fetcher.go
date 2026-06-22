@@ -67,6 +67,10 @@ func (f *DataFetcher) GetNetInfo(rpcURL string) (*types.NetInfo, error) {
 	return f.cometFetcher.WithEndpoint(rpcURL).GetNetInfo()
 }
 
+func (f *DataFetcher) GetNumUnconfirmedTxs() (int64, int64, error) {
+	return f.cometFetcher.GetNumUnconfirmedTxs()
+}
+
 func (f *DataFetcher) GetUpgradePlan() (*types.Upgrade, error) {
 	return f.cosmosFetcher.GetUpgradePlan()
 }

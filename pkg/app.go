@@ -159,6 +159,7 @@ func (a *App) Start() {
 	a.spawnRefresher("comet-node-info", a.Config.ChainInfoRefreshRate, a.RefreshCometNodeInfo)
 	a.spawnRefresher("upgrade", a.Config.UpgradeRefreshRate, a.RefreshUpgrade)
 	a.spawnRefresher("block-time", a.Config.BlockTimeRefreshRate, a.RefreshBlockTime)
+	a.spawnRefresher("mempool", a.Config.BlockTimeRefreshRate, a.RefreshMempool)
 	a.spawnRefresher("net-info", a.Config.RefreshRate, a.RefreshNetInfo)
 	a.spawnRefresher("health", a.Config.HealthRefreshRate, a.RefreshHealthMetrics)
 
@@ -375,6 +376,20 @@ func (a *App) RefreshBlockTime() {
 
 	a.State.SetBlockTime(blockTime)
 	a.DisplayWrapper.SetState(a.State)
+}
+
+func (a *App) RefreshMempool() {
+	if a.IsPaused.Load() {
+		return
+	}
+
+	txs, bytes, err := a.DataFetcher.GetNumUnconfirmedTxs()
+	if err != nil {
+		a.Logger.Error().Err(err).Msg("Error getting mempool size")
+		return
+	}
+
+	a.State.SetMempool(txs, bytes)
 }
 
 func (a *App) RefreshNetInfo() {
