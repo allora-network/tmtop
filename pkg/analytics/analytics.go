@@ -430,6 +430,53 @@ func (va *ValidatorAnalytics) GetRankingByHeight(ctx context.Context, minH, maxH
 	return out, nil
 }
 
+// ArrivalStats holds per-validator vote arrival latency relative to round start,
+// measured at this node (single-vantage). Latency reflects both validator
+// behavior and the local node's network distance from each peer.
+type ArrivalStats struct {
+	AvgPrevote   time.Duration
+	MaxPrevote   time.Duration
+	AvgPrecommit time.Duration
+	MaxPrecommit time.Duration
+}
+
+// GetVoteArrivalByHeight returns a map of hex address → ArrivalStats over the
+// height window [minH, maxH], derived from locally-observed vote timestamps
+// relative to round start (single-vantage semantics).
+//
+// Vote type 1 = prevote, 2 = precommit. Rows with zero samples are skipped.
+func (va *ValidatorAnalytics) GetVoteArrivalByHeight(ctx context.Context, minH, maxH int64) (map[string]ArrivalStats, error) {
+	rows, err := va.db.Queries().GetVoteArrivalByHeight(ctx, sqlc.GetVoteArrivalByHeightParams{
+		Height:   minH,
+		Height_2: maxH,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ArrivalStats, len(rows)/2+1)
+	for _, r := range rows {
+		if r.HexAddress == "" {
+			continue
+		}
+		avgSecs := convertToFloat64(r.AvgSecs)
+		maxSecs := convertToFloat64(r.MaxSecs)
+		avg := time.Duration(avgSecs * float64(time.Second))
+		max := time.Duration(maxSecs * float64(time.Second))
+
+		s := out[r.HexAddress]
+		switch r.VoteType {
+		case 1: // prevote
+			s.AvgPrevote = avg
+			s.MaxPrevote = max
+		case 2: // precommit
+			s.AvgPrecommit = avg
+			s.MaxPrecommit = max
+		}
+		out[r.HexAddress] = s
+	}
+	return out, nil
+}
+
 // GetProposerShareByHeight returns a map of hex address → proposer share
 // percentage over the height window [minH, maxH].
 func (va *ValidatorAnalytics) GetProposerShareByHeight(ctx context.Context, minH, maxH int64) (map[string]float64, error) {
