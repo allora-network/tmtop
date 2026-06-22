@@ -155,4 +155,17 @@ func TestEquivocationEventFields(t *testing.T) {
 	if ev.DetectedAt.IsZero() {
 		t.Errorf("DetectedAt must not be zero")
 	}
+	// BlockIDA and BlockIDB are the core payload: the two conflicting hashes.
+	// []byte("AAAA") hex-encodes to "41414141"; []byte("BBBB") to "42424242".
+	const wantA = "41414141"
+	const wantB = "42424242"
+	if ev.BlockIDA != wantA {
+		t.Errorf("want BlockIDA=%q, got %q", wantA, ev.BlockIDA)
+	}
+	if ev.BlockIDB != wantB {
+		t.Errorf("want BlockIDB=%q, got %q", wantB, ev.BlockIDB)
+	}
+	if ev.BlockIDA == ev.BlockIDB {
+		t.Errorf("BlockIDA and BlockIDB must differ; both are %q", ev.BlockIDA)
+	}
 }
