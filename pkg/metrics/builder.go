@@ -109,8 +109,11 @@ func (b *Builder) ObserveEvents(events []ctypes.TMEventData) {
 // is self-consistent with the halt timer.
 func (b *Builder) observe(state *types.State) {
 	height, round, _, _ := state.GetConsensusHeight()
-	b.curHeightMaxRound = int32(round)
 	if height == b.lastHeight {
+		// same height observed again: track the highest round seen for it
+		if int32(round) > b.curHeightMaxRound {
+			b.curHeightMaxRound = int32(round)
+		}
 		return
 	}
 	now := b.now()
@@ -118,11 +121,12 @@ func (b *Builder) observe(state *types.State) {
 		if !b.lastHeightChangeAt.IsZero() {
 			b.blockIntervals = appendRing(b.blockIntervals, now.Sub(b.lastHeightChangeAt))
 		}
-		// record the max round reached for the height we just left
+		// record the terminal max round for the height we just left, before reset
 		b.maxRoundPerHeight = appendRing32(b.maxRoundPerHeight, b.curHeightMaxRound)
 	}
 	b.lastHeight = height
 	b.lastHeightChangeAt = now
+	b.curHeightMaxRound = int32(round) // reset running max for the new height
 }
 
 func buildBaseRows(validators types.TMValidators) []ValidatorHealthRow {
