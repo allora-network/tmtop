@@ -80,7 +80,7 @@ func (d *ValidatorHealthTableData) redrawData() {
 // makeCells builds the full [][]*tview.TableCell from the current rows slice.
 // Layout: header row, separator row, one row per validator (2 + len(rows) total).
 func (d *ValidatorHealthTableData) makeCells() [][]*tview.TableCell {
-	const numCols = 13
+	const numCols = 12
 
 	// header + separator + one row per validator
 	cells := make([][]*tview.TableCell, len(d.rows)+2)
@@ -92,7 +92,6 @@ func (d *ValidatorHealthTableData) makeCells() [][]*tview.TableCell {
 		tview.NewTableCell("VP%"),
 		tview.NewTableCell("Sign%"),
 		tview.NewTableCell("Missed"),
-		tview.NewTableCell("Streak"),
 		tview.NewTableCell("Prevote%"),
 		tview.NewTableCell("Precommit%"),
 		tview.NewTableCell("Prop%"),
@@ -108,7 +107,6 @@ func (d *ValidatorHealthTableData) makeCells() [][]*tview.TableCell {
 		tview.NewTableCell("======="),
 		tview.NewTableCell("===="),
 		tview.NewTableCell("====="),
-		tview.NewTableCell("======"),
 		tview.NewTableCell("======"),
 		tview.NewTableCell("========"),
 		tview.NewTableCell("=========="),
@@ -132,31 +130,29 @@ func (d *ValidatorHealthTableData) makeCells() [][]*tview.TableCell {
 		// VP%
 		r[2] = tview.NewTableCell(fmt.Sprintf("%.2f", row.VotingPowerPct)).SetAlign(tview.AlignRight)
 
-		// History-backed columns: Sign%, Missed, Streak, Prevote%, Precommit%, Prop%
+		// History-backed columns: Sign%, Missed, Prevote%, Precommit%, Prop%
 		dash := "—"
 		if row.HasHistory {
 			r[3] = tview.NewTableCell(fmt.Sprintf("%.2f", row.SigningRatePct)).SetAlign(tview.AlignRight)
 			r[4] = tview.NewTableCell(strconv.FormatInt(row.BlocksMissed, 10)).SetAlign(tview.AlignRight)
-			r[5] = tview.NewTableCell(strconv.FormatInt(row.LongestMissStreak, 10)).SetAlign(tview.AlignRight)
-			r[6] = tview.NewTableCell(fmt.Sprintf("%.2f", row.PrevoteRatePct)).SetAlign(tview.AlignRight)
-			r[7] = tview.NewTableCell(fmt.Sprintf("%.2f", row.PrecommitRatePct)).SetAlign(tview.AlignRight)
-			r[8] = tview.NewTableCell(fmt.Sprintf("%.2f", row.ProposerSharePct)).SetAlign(tview.AlignRight)
+			r[5] = tview.NewTableCell(fmt.Sprintf("%.2f", row.PrevoteRatePct)).SetAlign(tview.AlignRight)
+			r[6] = tview.NewTableCell(fmt.Sprintf("%.2f", row.PrecommitRatePct)).SetAlign(tview.AlignRight)
+			r[7] = tview.NewTableCell(fmt.Sprintf("%.2f", row.ProposerSharePct)).SetAlign(tview.AlignRight)
 		} else {
 			r[3] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 			r[4] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 			r[5] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 			r[6] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 			r[7] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
-			r[8] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 		}
 
 		// Latency-backed columns: ArrPrevote, ArrPrecommit
 		if row.HasLatency {
-			r[9] = tview.NewTableCell(row.AvgPrevoteArrival.String()).SetAlign(tview.AlignRight)
-			r[10] = tview.NewTableCell(row.AvgPrecommitArrival.String()).SetAlign(tview.AlignRight)
+			r[8] = tview.NewTableCell(row.AvgPrevoteArrival.String()).SetAlign(tview.AlignRight)
+			r[9] = tview.NewTableCell(row.AvgPrecommitArrival.String()).SetAlign(tview.AlignRight)
 		} else {
+			r[8] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 			r[9] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
-			r[10] = tview.NewTableCell(dash).SetAlign(tview.AlignRight)
 		}
 
 		// ASN
@@ -165,13 +161,13 @@ func (d *ValidatorHealthTableData) makeCells() [][]*tview.TableCell {
 			if row.ASNOrg != "" {
 				asnText = utils.RightPadAndTrim(row.ASNOrg, 12)
 			}
-			r[11] = tview.NewTableCell(asnText)
+			r[10] = tview.NewTableCell(asnText)
 		} else {
-			r[11] = tview.NewTableCell(dash)
+			r[10] = tview.NewTableCell(dash)
 		}
 
 		// Status: Online indicator + optional equivocation warning
-		r[12] = tview.NewTableCell(d.serializeStatus(row.Online, row.Equivocated))
+		r[11] = tview.NewTableCell(d.serializeStatus(row.Online, row.Equivocated))
 
 		cells[i+2] = r
 	}

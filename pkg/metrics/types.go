@@ -74,7 +74,6 @@ type ValidatorHealthRow struct {
 	HasHistory        bool
 	SigningRatePct    float64
 	BlocksMissed      int64
-	LongestMissStreak int64
 	PrevoteRatePct    float64
 	PrecommitRatePct  float64
 	ProposerSharePct  float64

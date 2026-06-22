@@ -27,12 +27,12 @@ func TestValidatorHealthTableData_HeaderAndSeparator(t *testing.T) {
 	if d.GetRowCount() != 2 {
 		t.Errorf("expected 2 rows (header+sep), got %d", d.GetRowCount())
 	}
-	if d.GetColumnCount() != 13 {
-		t.Errorf("expected 13 columns, got %d", d.GetColumnCount())
+	if d.GetColumnCount() != 12 {
+		t.Errorf("expected 12 columns, got %d", d.GetColumnCount())
 	}
 
 	// Header row column names in order.
-	wantHeaders := []string{"#", "Moniker", "VP%", "Sign%", "Missed", "Streak",
+	wantHeaders := []string{"#", "Moniker", "VP%", "Sign%", "Missed",
 		"Prevote%", "Precommit%", "Prop%", "ArrPrevote", "ArrPrecommit", "ASN", "Status"}
 	for i, want := range wantHeaders {
 		cell := d.GetCell(0, i)
@@ -59,8 +59,8 @@ func TestValidatorHealthTableData_DashWhenNoHistory(t *testing.T) {
 
 	// row index 2 (0=header, 1=sep, 2=first data row)
 	const dataRow = 2
-	// Columns 3..8 (Sign%..Prop%) and 9..10 (arrival) should all be "—".
-	dashCols := []int{3, 4, 5, 6, 7, 8, 9, 10}
+	// Columns 3..7 (Sign%..Prop%) and 8..9 (arrival) should all be "—".
+	dashCols := []int{3, 4, 5, 6, 7, 8, 9}
 	for _, col := range dashCols {
 		cell := d.GetCell(dataRow, col)
 		if cell == nil {
@@ -81,7 +81,6 @@ func TestValidatorHealthTableData_ValuesWhenHasHistory(t *testing.T) {
 		HasHistory:          true,
 		SigningRatePct:      99.1,
 		BlocksMissed:        5,
-		LongestMissStreak:   2,
 		PrevoteRatePct:      98.0,
 		PrecommitRatePct:    97.5,
 		ProposerSharePct:    0.33,
@@ -93,8 +92,8 @@ func TestValidatorHealthTableData_ValuesWhenHasHistory(t *testing.T) {
 	d.SetRows([]metrics.ValidatorHealthRow{row})
 
 	const dataRow = 2
-	// Columns 3..8 must NOT be "—".
-	histCols := []int{3, 4, 5, 6, 7, 8}
+	// Columns 3..7 must NOT be "—".
+	histCols := []int{3, 4, 5, 6, 7}
 	for _, col := range histCols {
 		cell := d.GetCell(dataRow, col)
 		if cell == nil {
@@ -106,7 +105,7 @@ func TestValidatorHealthTableData_ValuesWhenHasHistory(t *testing.T) {
 	}
 
 	// Arrival columns must not be "—" when HasLatency=true.
-	for _, col := range []int{9, 10} {
+	for _, col := range []int{8, 9} {
 		cell := d.GetCell(dataRow, col)
 		if cell == nil {
 			t.Fatalf("cell nil at row=%d col=%d", dataRow, col)
@@ -135,7 +134,7 @@ func TestValidatorHealthTableData_StatusEmoji(t *testing.T) {
 		{4, "✅⚠"},
 	}
 	for _, tt := range tests {
-		cell := d.GetCell(tt.dataRow, 12)
+		cell := d.GetCell(tt.dataRow, 11)
 		if cell == nil {
 			t.Fatalf("status cell nil at row=%d", tt.dataRow)
 		}
@@ -163,7 +162,7 @@ func TestValidatorHealthTableData_StatusDisableEmojis(t *testing.T) {
 		{4, "[on][!]"},
 	}
 	for _, tt := range tests {
-		cell := d.GetCell(tt.dataRow, 12)
+		cell := d.GetCell(tt.dataRow, 11)
 		if cell == nil {
 			t.Fatalf("status cell nil at row=%d", tt.dataRow)
 		}
@@ -185,7 +184,7 @@ func TestValidatorHealthTableData_RowCount(t *testing.T) {
 	if d.GetRowCount() != 7 {
 		t.Errorf("expected 7 rows, got %d", d.GetRowCount())
 	}
-	if d.GetColumnCount() != 13 {
-		t.Errorf("expected 13 columns, got %d", d.GetColumnCount())
+	if d.GetColumnCount() != 12 {
+		t.Errorf("expected 12 columns, got %d", d.GetColumnCount())
 	}
 }
