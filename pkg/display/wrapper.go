@@ -8,6 +8,7 @@ import (
 	"time"
 
 	configPkg "main/pkg/config"
+	"main/pkg/metrics"
 	"main/pkg/types"
 	"main/static"
 
@@ -20,6 +21,8 @@ const (
 	ModeLastRound = iota
 	ModeAllRounds
 	ModeNetInfo
+	ModeValidatorHealth
+	ModeNetworkHealth
 )
 
 const (
@@ -38,10 +41,12 @@ type Wrapper struct {
 	LastRoundTableData    *LastRoundTableData
 	AllRoundsTable        *tview.Table
 	AllRoundsTableData    *AllRoundsTableData
-	NetInfoTable          *tview.Table
-	NetInfoTableData      *NetInfoTableData
-	RPCsTable             *tview.Table
-	RPCsTableData         *RPCsTableData
+	NetInfoTable             *tview.Table
+	NetInfoTableData         *NetInfoTableData
+	ValidatorHealthTable     *tview.Table
+	ValidatorHealthTableData *ValidatorHealthTableData
+	RPCsTable                *tview.Table
+	RPCsTableData            *RPCsTableData
 	Grid                  *tview.Grid
 	Pages                 *tview.Pages
 	App                   *tview.Application
@@ -76,6 +81,7 @@ func NewWrapper(
 	lastRoundTableData := NewLastRoundTableData(DefaultColumnsCount, config.DisableEmojis, false)
 	allRoundsTableData := NewAllRoundsTableData(config.DisableEmojis, false)
 	netInfoTableData := NewNetInfoTableData()
+	validatorHealthTableData := NewValidatorHealthTableData(config.DisableEmojis)
 	rpcsTableData := NewRPCsTableData()
 
 	helpTextBytes, _ := static.TemplatesFs.ReadFile("help.txt")
@@ -98,6 +104,13 @@ func NewWrapper(
 		SetFixed(2, 0).
 		SetEvaluateAllRows(true).
 		SetContent(netInfoTableData)
+
+	validatorHealthTable := tview.NewTable().
+		SetBorders(false).
+		SetSelectable(false, false).
+		SetFixed(2, 0).
+		SetEvaluateAllRows(true).
+		SetContent(validatorHealthTableData)
 
 	rpcsTable := tview.NewTable().
 		SetBorders(false).
@@ -143,9 +156,11 @@ func NewWrapper(
 		LastRoundTableData:    lastRoundTableData,
 		AllRoundsTable:        allRoundsTable,
 		AllRoundsTableData:    allRoundsTableData,
-		NetInfoTable:          netInfoTable,
-		NetInfoTableData:      netInfoTableData,
-		RPCsTable:             rpcsTable,
+		NetInfoTable:             netInfoTable,
+		NetInfoTableData:         netInfoTableData,
+		ValidatorHealthTable:     validatorHealthTable,
+		ValidatorHealthTableData: validatorHealthTableData,
+		RPCsTable:                rpcsTable,
 		RPCsTableData:         rpcsTableData,
 		HelpModal:             helpModal,
 		Grid:                  grid,
@@ -230,6 +245,7 @@ func (w *Wrapper) Start() error {
 	w.LastRoundTable.SetBackgroundColor(tcell.ColorDefault)
 	w.AllRoundsTable.SetBackgroundColor(tcell.ColorDefault)
 	w.NetInfoTable.SetBackgroundColor(tcell.ColorDefault)
+	w.ValidatorHealthTable.SetBackgroundColor(tcell.ColorDefault)
 	w.RPCsTable.SetBackgroundColor(tcell.ColorSteelBlue)
 	w.ChainInfoTextView.SetBackgroundColor(tcell.ColorDefault)
 	w.ConsensusInfoTextView.SetBackgroundColor(tcell.ColorDefault)
@@ -321,6 +337,9 @@ func (w *Wrapper) SetState(state *types.State) {
 			w.AllRoundsTable.ScrollToBeginning()
 		}
 		w.NetInfoTableData.SetNetInfo(state.GetNetInfo())
+		if rows, ok := state.GetValidatorHealth().([]metrics.ValidatorHealthRow); ok {
+			w.ValidatorHealthTableData.SetRows(rows)
+		}
 		w.RPCsTableData.SetKnownRPCs(state.KnownRPCs().Values())
 
 		w.ConsensusInfoTextView.Clear()
@@ -370,6 +389,10 @@ func (w *Wrapper) ChangeMode() {
 	case ModeAllRounds:
 		w.Mode = ModeNetInfo
 	case ModeNetInfo:
+		w.Mode = ModeValidatorHealth
+	case ModeValidatorHealth:
+		w.Mode = ModeNetworkHealth
+	case ModeNetworkHealth:
 		w.Mode = ModeLastRound
 	case ModeLastRound:
 		w.Mode = ModeAllRounds
@@ -404,13 +427,18 @@ func (w *Wrapper) Redraw() {
 		table = w.AllRoundsTable
 	} else if w.Mode == ModeNetInfo {
 		table = w.NetInfoTable
+	} else if w.Mode == ModeValidatorHealth {
+		table = w.ValidatorHealthTable
 	}
+	// ModeNetworkHealth falls through to the default (LastRoundTable) until
+	// Task 0.7 wires its own widget; this prevents a nil-table crash.
 
 	w.Grid.RemoveItem(w.ConsensusInfoTextView)
 	w.Grid.RemoveItem(w.ChainInfoTextView)
 	w.Grid.RemoveItem(w.ProgressTextView)
 	w.Grid.RemoveItem(w.LastRoundTable)
 	w.Grid.RemoveItem(w.AllRoundsTable)
+	w.Grid.RemoveItem(w.ValidatorHealthTable)
 	w.Grid.RemoveItem(w.DebugTextView)
 
 	w.Grid.AddItem(w.ConsensusInfoTextView, 0, 0, w.InfoBlockWidth, 3, 1, 1, false)
