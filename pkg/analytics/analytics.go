@@ -383,6 +383,76 @@ func (va *ValidatorAnalytics) GetAllValidatorMetrics(ctx context.Context, window
 	return result, nil
 }
 
+// GetMaxStoredHeight returns the highest block height persisted in the DB,
+// or 0 when no data exists yet.
+func (va *ValidatorAnalytics) GetMaxStoredHeight(ctx context.Context) (int64, error) {
+	raw, err := va.db.Queries().GetMaxStoredHeight(ctx)
+	if err != nil {
+		return 0, err
+	}
+	switch v := raw.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case float64:
+		return int64(v), nil
+	case nil:
+		return 0, nil
+	}
+	return 0, nil
+}
+
+// GetRankingByHeight returns signing/participation ranking for all validators
+// over the height window [minH, maxH].
+func (va *ValidatorAnalytics) GetRankingByHeight(ctx context.Context, minH, maxH int64) ([]ValidatorRanking, error) {
+	rows, err := va.db.Queries().GetValidatorRankingByHeight(ctx, sqlc.GetValidatorRankingByHeightParams{
+		Height:   minH,
+		Height_2: maxH,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ValidatorRanking, len(rows))
+	for i, r := range rows {
+		out[i] = ValidatorRanking{
+			HexAddress:        r.HexAddress,
+			Moniker:           r.Moniker.String,
+			TotalBlocks:       r.TotalBlocks,
+			BlocksSigned:      r.BlocksSigned,
+			BlocksMissed:      r.BlocksMissed,
+			SigningEfficiency: convertToFloat64(r.SigningEfficiency),
+			PrevotesCast:      r.PrevotesCast,
+			PrecommitsCast:    r.PrecommitsCast,
+			VotingPower:       convertToInt64(r.VotingPower),
+		}
+	}
+	return out, nil
+}
+
+// GetProposerShareByHeight returns a map of hex address → proposer share
+// percentage over the height window [minH, maxH].
+func (va *ValidatorAnalytics) GetProposerShareByHeight(ctx context.Context, minH, maxH int64) (map[string]float64, error) {
+	rows, err := va.db.Queries().GetProposerPerformanceByHeight(ctx, sqlc.GetProposerPerformanceByHeightParams{
+		Height:   minH,
+		Height_2: maxH,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var total int64
+	for _, r := range rows {
+		total += r.BlocksProposed
+	}
+	out := make(map[string]float64, len(rows))
+	for _, r := range rows {
+		if total > 0 {
+			out[r.HexAddress.String] = 100.0 * float64(r.BlocksProposed) / float64(total)
+		}
+	}
+	return out, nil
+}
+
 // GetPerformanceTimeSeries returns time-series performance data.
 func (va *ValidatorAnalytics) GetPerformanceTimeSeries(ctx context.Context, validatorAddr string, window TimeWindow) ([]TimeSeriesPoint, error) {
 	queries := va.db.Queries()
