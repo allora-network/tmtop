@@ -78,7 +78,7 @@ type MockFetcher_Block_Call struct {
 
 // Block is a helper method to define mock.On call
 //   - height int64
-func (_e *MockFetcher_Expecter) Block(height interface{}) *MockFetcher_Block_Call {
+func (_e *MockFetcher_Expecter) Block(height any) *MockFetcher_Block_Call {
 	return &MockFetcher_Block_Call{Call: _e.mock.On("Block", height)}
 }
 
@@ -129,7 +129,7 @@ type MockFetcher_Close_Call struct {
 
 // Close is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockFetcher_Expecter) Close(ctx interface{}) *MockFetcher_Close_Call {
+func (_e *MockFetcher_Expecter) Close(ctx any) *MockFetcher_Close_Call {
 	return &MockFetcher_Close_Call{Call: _e.mock.On("Close", ctx)}
 }
 
@@ -244,7 +244,7 @@ type MockFetcher_GetCometNodeStatus_Call struct {
 
 // GetCometNodeStatus is a helper method to define mock.On call
 //   - rpcURL string
-func (_e *MockFetcher_Expecter) GetCometNodeStatus(rpcURL interface{}) *MockFetcher_GetCometNodeStatus_Call {
+func (_e *MockFetcher_Expecter) GetCometNodeStatus(rpcURL any) *MockFetcher_GetCometNodeStatus_Call {
 	return &MockFetcher_GetCometNodeStatus_Call{Call: _e.mock.On("GetCometNodeStatus", rpcURL)}
 }
 
@@ -361,7 +361,7 @@ type MockFetcher_GetNetInfo_Call struct {
 
 // GetNetInfo is a helper method to define mock.On call
 //   - rpcURL string
-func (_e *MockFetcher_Expecter) GetNetInfo(rpcURL interface{}) *MockFetcher_GetNetInfo_Call {
+func (_e *MockFetcher_Expecter) GetNetInfo(rpcURL any) *MockFetcher_GetNetInfo_Call {
 	return &MockFetcher_GetNetInfo_Call{Call: _e.mock.On("GetNetInfo", rpcURL)}
 }
 
@@ -384,6 +384,65 @@ func (_c *MockFetcher_GetNetInfo_Call) Return(netInfo *types0.NetInfo, err error
 }
 
 func (_c *MockFetcher_GetNetInfo_Call) RunAndReturn(run func(rpcURL string) (*types0.NetInfo, error)) *MockFetcher_GetNetInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetNumUnconfirmedTxs provides a mock function for the type MockFetcher
+func (_mock *MockFetcher) GetNumUnconfirmedTxs() (int64, int64, error) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNumUnconfirmedTxs")
+	}
+
+	var r0 int64
+	var r1 int64
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func() (int64, int64, error)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() int64); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func() int64); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+	if returnFunc, ok := ret.Get(2).(func() error); ok {
+		r2 = returnFunc()
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockFetcher_GetNumUnconfirmedTxs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNumUnconfirmedTxs'
+type MockFetcher_GetNumUnconfirmedTxs_Call struct {
+	*mock.Call
+}
+
+// GetNumUnconfirmedTxs is a helper method to define mock.On call
+func (_e *MockFetcher_Expecter) GetNumUnconfirmedTxs() *MockFetcher_GetNumUnconfirmedTxs_Call {
+	return &MockFetcher_GetNumUnconfirmedTxs_Call{Call: _e.mock.On("GetNumUnconfirmedTxs")}
+}
+
+func (_c *MockFetcher_GetNumUnconfirmedTxs_Call) Run(run func()) *MockFetcher_GetNumUnconfirmedTxs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFetcher_GetNumUnconfirmedTxs_Call) Return(n int64, n1 int64, err error) *MockFetcher_GetNumUnconfirmedTxs_Call {
+	_c.Call.Return(n, n1, err)
+	return _c
+}
+
+func (_c *MockFetcher_GetNumUnconfirmedTxs_Call) RunAndReturn(run func() (int64, int64, error)) *MockFetcher_GetNumUnconfirmedTxs_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -499,23 +558,14 @@ func (_c *MockFetcher_GetValidators_Call) RunAndReturn(run func() ([]types0.TMVa
 }
 
 // Subscribe provides a mock function for the type MockFetcher
-//
-// NOTE: hand-patched after mockery codegen. The mockery v3.7 testify
-// template generates `_mock.Called(mb, events)` here, passing the
-// variadic slice as a single argument. The matching EXPECT().Subscribe
-// helper below already spreads its variadic arguments via
-// `append([]interface{}{mb}, events...)...`, so the two would never
-// agree on argument count and any expectation set with concrete event
-// names would silently fail to match. Spread events into individual
-// interface{} values so the registered call shape matches the
-// expectation. If/when mockery is regenerated this needs to be
-// re-applied.
 func (_mock *MockFetcher) Subscribe(mb *utils.Mailbox[types1.TMEventData], events ...string) {
-	_ca := []interface{}{mb}
-	for _, e := range events {
-		_ca = append(_ca, e)
+	if len(events) > 0 {
+		_mock.Called(mb, events)
+	} else {
+		_mock.Called(mb)
 	}
-	_mock.Called(_ca...)
+
+	return
 }
 
 // MockFetcher_Subscribe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Subscribe'
@@ -526,9 +576,9 @@ type MockFetcher_Subscribe_Call struct {
 // Subscribe is a helper method to define mock.On call
 //   - mb *utils.Mailbox[types1.TMEventData]
 //   - events ...string
-func (_e *MockFetcher_Expecter) Subscribe(mb interface{}, events ...interface{}) *MockFetcher_Subscribe_Call {
+func (_e *MockFetcher_Expecter) Subscribe(mb any, events ...any) *MockFetcher_Subscribe_Call {
 	return &MockFetcher_Subscribe_Call{Call: _e.mock.On("Subscribe",
-		append([]interface{}{mb}, events...)...)}
+		append([]any{mb}, events...)...)}
 }
 
 func (_c *MockFetcher_Subscribe_Call) Run(run func(mb *utils.Mailbox[types1.TMEventData], events ...string)) *MockFetcher_Subscribe_Call {
