@@ -141,7 +141,7 @@ func SerializeNetworkHealth(s *types.State, disableEmojis bool) string {
 	// ── SECURITY ────────────────────────────────────────────────────────────
 	fmt.Fprintf(&sb, " SECURITY\n")
 	if len(nh.Equivocations) == 0 {
-		fmt.Fprintf(&sb, "   no equivocations detected\n")
+		fmt.Fprintf(&sb, "   no equivocations detected (same-round only)\n")
 	} else {
 		for _, ev := range nh.Equivocations {
 			addr := ev.ValidatorAddress

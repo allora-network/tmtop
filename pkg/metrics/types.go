@@ -52,7 +52,10 @@ type ASNShare struct {
 }
 
 // EquivocationEvent records a validator signing two distinct block IDs for
-// the same (height, round, vote type).
+// the same (height, round, vote type). Detection is limited to conflicts
+// within a single consensus round — it does not cross rounds and does not
+// compare PartSetHeader. A validator that votes for different blocks in
+// different rounds (e.g. after a round timeout) will NOT be flagged.
 type EquivocationEvent struct {
 	ValidatorAddress string
 	Moniker          string
