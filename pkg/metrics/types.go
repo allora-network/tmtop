@@ -74,12 +74,12 @@ type ValidatorHealthRow struct {
 	VotingPowerPct float64
 
 	// Tier 1 DB-backed (HasHistory=false when DB disabled → render "—")
-	HasHistory        bool
-	SigningRatePct    float64
-	BlocksMissed      int64
-	PrevoteRatePct    float64
-	PrecommitRatePct  float64
-	ProposerSharePct  float64
+	HasHistory       bool
+	SigningRatePct   float64
+	BlocksMissed     int64
+	PrevoteRatePct   float64
+	PrecommitRatePct float64
+	ProposerSharePct float64
 
 	// Arrival latency, single-vantage (WS-F); zero ⇒ unavailable
 	HasLatency          bool
