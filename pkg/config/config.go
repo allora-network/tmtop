@@ -34,6 +34,11 @@ type InputConfig struct {
 	AnalyticsValidator  string
 	AnalyticsTimeWindow string
 	AnalyticsCommand    string
+
+	// Health metrics configuration
+	HealthRefreshRate  time.Duration
+	HealthWindowBlocks int64
+	ASNDatabasePath    string
 }
 
 type ChainType string
@@ -119,6 +124,9 @@ func ParseAndValidateConfig(input InputConfig) (*Config, error) {
 		AnalyticsValidator:    input.AnalyticsValidator,
 		AnalyticsTimeWindow:   input.AnalyticsTimeWindow,
 		AnalyticsCommand:      input.AnalyticsCommand,
+		HealthRefreshRate:     input.HealthRefreshRate,
+		HealthWindowBlocks:    input.HealthWindowBlocks,
+		ASNDatabasePath:       input.ASNDatabasePath,
 	}
 
 	return config, nil
@@ -152,6 +160,11 @@ type Config struct {
 	AnalyticsValidator  string
 	AnalyticsTimeWindow string
 	AnalyticsCommand    string
+
+	// Health metrics configuration
+	HealthRefreshRate  time.Duration
+	HealthWindowBlocks int64
+	ASNDatabasePath    string
 }
 
 func (c Config) GetProviderOrConsumerHost() string {

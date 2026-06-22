@@ -105,6 +105,9 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	v.BindEnv("database-path", "TMTOP_DATABASE_PATH")
 	v.BindEnv("max-retain-blocks", "TMTOP_MAX_RETAIN_BLOCKS")
 	v.BindEnv("max-retain-days", "TMTOP_MAX_RETAIN_DAYS")
+	v.BindEnv("health-refresh-rate", "TMTOP_HEALTH_REFRESH_RATE")
+	v.BindEnv("health-window-blocks", "TMTOP_HEALTH_WINDOW_BLOCKS")
+	v.BindEnv("asn-database-path", "TMTOP_ASN_DATABASE_PATH")
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {
@@ -181,6 +184,15 @@ func loadConfigFile(configFile string, config *configPkg.InputConfig) error {
 	if v.IsSet("max-retain-days") {
 		config.MaxRetainDays = v.GetInt("max-retain-days")
 	}
+	if v.IsSet("health-refresh-rate") {
+		config.HealthRefreshRate = v.GetDuration("health-refresh-rate")
+	}
+	if v.IsSet("health-window-blocks") {
+		config.HealthWindowBlocks = v.GetInt64("health-window-blocks")
+	}
+	if v.IsSet("asn-database-path") {
+		config.ASNDatabasePath = v.GetString("asn-database-path")
+	}
 
 	return nil
 }
@@ -229,6 +241,11 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&config.AnalyticsValidator, "analytics-validator", "", "Validator address for analytics (required in analytics mode)")
 	rootCmd.PersistentFlags().StringVar(&config.AnalyticsTimeWindow, "analytics-time-window", "24h", "Time window for analytics (Go duration: 30m, 1h, 24h, 168h, etc.)")
 	rootCmd.PersistentFlags().StringVar(&config.AnalyticsCommand, "analytics-command", "performance", "Analytics command to run (performance, rankings, timeseries, debug, diagnose, search)")
+
+	// Health metrics flags
+	rootCmd.PersistentFlags().DurationVar(&config.HealthRefreshRate, "health-refresh-rate", 5*time.Second, "Health metrics refresh rate")
+	rootCmd.PersistentFlags().Int64Var(&config.HealthWindowBlocks, "health-window-blocks", 1000, "Number of blocks to include in health metrics window")
+	rootCmd.PersistentFlags().StringVar(&config.ASNDatabasePath, "asn-database-path", "", "Path to MaxMind GeoLite2-ASN database file")
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.GetDefaultLogger().Fatal().Err(err).Msg("Could not start application")
