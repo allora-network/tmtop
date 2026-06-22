@@ -6,5 +6,5 @@ import (
 	"main/pkg/types"
 )
 
-func enrichASN(nh *NetworkHealth, s *types.State, a *asn.Lookup)              {}
-func enrichASNRows(rows []ValidatorHealthRow, s *types.State, a *asn.Lookup)  {}
+func enrichASN(nh *NetworkHealth, s *types.State, a *asn.Lookup)             {}
+func enrichASNRows(rows []ValidatorHealthRow, s *types.State, a *asn.Lookup) {}

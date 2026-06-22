@@ -36,8 +36,8 @@ func TestSerializeNetworkHealth_PopulatedSnapshot(t *testing.T) {
 		// Fill a few to verify non-zero paths.
 		ChainHalted:        false,
 		SecondsSinceHeight: 0,
-		CurrentMaxRound:    0,    // zero → dash
-		OfflineCount:       0,    // zero → dash
+		CurrentMaxRound:    0, // zero → dash
+		OfflineCount:       0, // zero → dash
 		RoundsPerBlockAvg:  0.04,
 		RoundZeroCommitPct: 96.1,
 		AvgBlockTime:       time.Duration(6.2 * float64(time.Second)),

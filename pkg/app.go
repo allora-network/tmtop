@@ -490,4 +490,3 @@ func (a *App) databaseCleanupRoutine() {
 		}
 	}
 }
-

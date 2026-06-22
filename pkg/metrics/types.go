@@ -13,11 +13,11 @@ type NetworkHealth struct {
 	OfflinePowerPct    float64
 
 	// Consensus quality (WS-C)
-	RoundsPerBlockAvg      float64
-	RoundZeroCommitPct     float64
-	AvgBlockTime           time.Duration
-	BlockTimeStdDev        time.Duration
-	BlockIntervals         []time.Duration // recent, oldest→newest, for sparkline
+	RoundsPerBlockAvg  float64
+	RoundZeroCommitPct float64
+	AvgBlockTime       time.Duration
+	BlockTimeStdDev    time.Duration
+	BlockIntervals     []time.Duration // recent, oldest→newest, for sparkline
 
 	// Step timing (WS-H)
 	AvgProposeTime   time.Duration

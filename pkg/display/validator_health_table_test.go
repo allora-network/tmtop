@@ -75,20 +75,20 @@ func TestValidatorHealthTableData_DashWhenNoHistory(t *testing.T) {
 func TestValidatorHealthTableData_ValuesWhenHasHistory(t *testing.T) {
 	d := NewValidatorHealthTableData(false)
 	row := metrics.ValidatorHealthRow{
-		Address:           "valaddr2",
-		Moniker:           "healthy-val",
-		VotingPowerPct:    2.50,
-		HasHistory:        true,
-		SigningRatePct:    99.1,
-		BlocksMissed:      5,
-		LongestMissStreak: 2,
-		PrevoteRatePct:    98.0,
-		PrecommitRatePct:  97.5,
-		ProposerSharePct:  0.33,
-		HasLatency:        true,
-		AvgPrevoteArrival: 100 * time.Millisecond,
+		Address:             "valaddr2",
+		Moniker:             "healthy-val",
+		VotingPowerPct:      2.50,
+		HasHistory:          true,
+		SigningRatePct:      99.1,
+		BlocksMissed:        5,
+		LongestMissStreak:   2,
+		PrevoteRatePct:      98.0,
+		PrecommitRatePct:    97.5,
+		ProposerSharePct:    0.33,
+		HasLatency:          true,
+		AvgPrevoteArrival:   100 * time.Millisecond,
 		AvgPrecommitArrival: 150 * time.Millisecond,
-		Online:            true,
+		Online:              true,
 	}
 	d.SetRows([]metrics.ValidatorHealthRow{row})
 

@@ -33,14 +33,14 @@ const (
 )
 
 type Wrapper struct {
-	ConsensusInfoTextView *tview.TextView
-	ChainInfoTextView     *tview.TextView
-	ProgressTextView      *tview.TextView
-	DebugTextView         *tview.TextView
-	LastRoundTable        *tview.Table
-	LastRoundTableData    *LastRoundTableData
-	AllRoundsTable        *tview.Table
-	AllRoundsTableData    *AllRoundsTableData
+	ConsensusInfoTextView    *tview.TextView
+	ChainInfoTextView        *tview.TextView
+	ProgressTextView         *tview.TextView
+	DebugTextView            *tview.TextView
+	LastRoundTable           *tview.Table
+	LastRoundTableData       *LastRoundTableData
+	AllRoundsTable           *tview.Table
+	AllRoundsTableData       *AllRoundsTableData
 	NetInfoTable             *tview.Table
 	NetInfoTableData         *NetInfoTableData
 	ValidatorHealthTable     *tview.Table
@@ -48,10 +48,10 @@ type Wrapper struct {
 	NetworkHealthTextView    *tview.TextView
 	RPCsTable                *tview.Table
 	RPCsTableData            *RPCsTableData
-	Grid                  *tview.Grid
-	Pages                 *tview.Pages
-	App                   *tview.Application
-	HelpModal             *tview.Modal
+	Grid                     *tview.Grid
+	Pages                    *tview.Pages
+	App                      *tview.Application
+	HelpModal                *tview.Modal
 
 	InfoBlockWidth int
 	ColumnsCount   int
@@ -151,36 +151,36 @@ func NewWrapper(
 	app := tview.NewApplication().SetRoot(pages, true).SetFocus(lastRoundTable)
 
 	return &Wrapper{
-		State:                 state,
-		ChainInfoTextView:     chainInfoTextView,
-		ConsensusInfoTextView: consensusInfoTextView,
-		ProgressTextView:      progressTextView,
-		DebugTextView:         debugTextView,
-		LastRoundTable:        lastRoundTable,
-		LastRoundTableData:    lastRoundTableData,
-		AllRoundsTable:        allRoundsTable,
-		AllRoundsTableData:    allRoundsTableData,
+		State:                    state,
+		ChainInfoTextView:        chainInfoTextView,
+		ConsensusInfoTextView:    consensusInfoTextView,
+		ProgressTextView:         progressTextView,
+		DebugTextView:            debugTextView,
+		LastRoundTable:           lastRoundTable,
+		LastRoundTableData:       lastRoundTableData,
+		AllRoundsTable:           allRoundsTable,
+		AllRoundsTableData:       allRoundsTableData,
 		NetInfoTable:             netInfoTable,
 		NetInfoTableData:         netInfoTableData,
 		ValidatorHealthTable:     validatorHealthTable,
 		ValidatorHealthTableData: validatorHealthTableData,
 		NetworkHealthTextView:    networkHealthTextView,
 		RPCsTable:                rpcsTable,
-		RPCsTableData:         rpcsTableData,
-		HelpModal:             helpModal,
-		Grid:                  grid,
-		Pages:                 pages,
-		App:                   app,
-		Logger:                logger.With().Str("component", "display_wrapper").Logger(),
-		DebugEnabled:          false,
-		InfoBlockWidth:        2,
-		ColumnsCount:          DefaultColumnsCount,
-		Mode:                  DefaultMode,
-		paused:                paused,
-		IsHelpDisplayed:       false,
-		DisableEmojis:         config.DisableEmojis,
-		Transpose:             false,
-		Timezone:              config.Timezone,
+		RPCsTableData:            rpcsTableData,
+		HelpModal:                helpModal,
+		Grid:                     grid,
+		Pages:                    pages,
+		App:                      app,
+		Logger:                   logger.With().Str("component", "display_wrapper").Logger(),
+		DebugEnabled:             false,
+		InfoBlockWidth:           2,
+		ColumnsCount:             DefaultColumnsCount,
+		Mode:                     DefaultMode,
+		paused:                   paused,
+		IsHelpDisplayed:          false,
+		DisableEmojis:            config.DisableEmojis,
+		Transpose:                false,
+		Timezone:                 config.Timezone,
 	}
 }
 

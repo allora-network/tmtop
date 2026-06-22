@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"main/pkg/types"
 	"github.com/rs/zerolog"
+	"main/pkg/types"
 )
 
 func TestBuilderBuildEmpty(t *testing.T) {

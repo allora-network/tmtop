@@ -40,8 +40,8 @@ type State struct {
 	BlockTime time.Duration
 	NetInfo   *NetInfo
 
-	networkHealth   any   // *metrics.NetworkHealth; any avoids import cycle
-	validatorHealth any   // []metrics.ValidatorHealthRow
+	networkHealth   any // *metrics.NetworkHealth; any avoids import cycle
+	validatorHealth any // []metrics.ValidatorHealthRow
 	mempoolTxs      int64
 	mempoolBytes    int64
 	mempoolKnown    bool
@@ -244,8 +244,16 @@ func (s *State) GetNetInfo() *NetInfo {
 func (s *State) SetNetworkHealth(h any) { s.mu.Lock(); defer s.mu.Unlock(); s.networkHealth = h }
 func (s *State) GetNetworkHealth() any  { s.mu.RLock(); defer s.mu.RUnlock(); return s.networkHealth }
 
-func (s *State) SetValidatorHealth(rows any) { s.mu.Lock(); defer s.mu.Unlock(); s.validatorHealth = rows }
-func (s *State) GetValidatorHealth() any     { s.mu.RLock(); defer s.mu.RUnlock(); return s.validatorHealth }
+func (s *State) SetValidatorHealth(rows any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.validatorHealth = rows
+}
+func (s *State) GetValidatorHealth() any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.validatorHealth
+}
 
 func (s *State) SetMempool(txs, bytes int64) {
 	s.mu.Lock()
